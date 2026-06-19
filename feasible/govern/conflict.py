@@ -101,8 +101,8 @@ def resolve_conflicts(ir: FCIR, conflicts: list[Conflict], policy: ConflictPolic
         )
         if pa is not None and pb is not None and pa != pb and not has_exception:
             loser, winner = (p, o) if pa > pb else (o, p)
-            win_label = policy.label(winner.resolution_class) or winner.resolution_class
-            lose_label = policy.label(loser.resolution_class) or loser.resolution_class
+            win_label = policy.label(winner.resolution_class or "") or winner.resolution_class
+            lose_label = policy.label(loser.resolution_class or "") or loser.resolution_class
             resolutions.append(Resolution(
                 conflict=c, resolution_mode="AUTO_BY_POLICY", dropped_rule_id=loser.rule_id,
                 rationale=(f"{winner.resolution_class}({max(pa, pb)}) > {loser.resolution_class}"

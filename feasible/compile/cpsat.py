@@ -95,9 +95,8 @@ def build_model(ir: FCIR) -> tuple[cp_model.CpModel, VarIndex]:
         ops_here = [o for o in inst.operations if mc in o.eligible_machines]
         if not ops_here:
             continue
-        node = {DEPOT: 0}
-        for i, o in enumerate(ops_here):
-            node[o.op_id] = i + 1
+        # op nodes are 1..n; the depot node is 0 (used as a literal below)
+        node: dict[str, int] = {o.op_id: idx + 1 for idx, o in enumerate(ops_here)}
         circuit: list[tuple[int, int, cp_model.IntVar]] = []
 
         depot_loop = m.new_bool_var(f"depotloop_{mc}")
@@ -114,30 +113,30 @@ def build_model(ir: FCIR) -> tuple[cp_model.CpModel, VarIndex]:
             circuit.append((0, node[o.op_id], en))
             circuit.append((node[o.op_id], 0, ex))
 
-        for i in ops_here:
-            for j in ops_here:
-                if i.op_id == j.op_id:
+        for op_i in ops_here:
+            for op_j in ops_here:
+                if op_i.op_id == op_j.op_id:
                     continue
-                a = m.new_bool_var(f"arc_{i.op_id}_{j.op_id}_{mc}")
-                arcs[(i.op_id, j.op_id, mc)] = a
-                circuit.append((node[i.op_id], node[j.op_id], a))
-                gap = inst.setup(_family_of(ir, i.op_id), _family_of(ir, j.op_id))
-                m.add(starts[j.op_id] >= ends[i.op_id] + gap).only_enforce_if(a)
+                a = m.new_bool_var(f"arc_{op_i.op_id}_{op_j.op_id}_{mc}")
+                arcs[(op_i.op_id, op_j.op_id, mc)] = a
+                circuit.append((node[op_i.op_id], node[op_j.op_id], a))
+                gap = inst.setup(_family_of(ir, op_i.op_id), _family_of(ir, op_j.op_id))
+                m.add(starts[op_j.op_id] >= ends[op_i.op_id] + gap).only_enforce_if(a)
                 if gap > 0:
                     changeover_terms.append(gap * a)
-                    # materialized cleanout interval between i and j on mc
-                    cs = m.new_int_var(0, H, f"cleanstart_{i.op_id}_{j.op_id}_{mc}")
-                    ci = m.new_optional_interval_var(cs, gap, cs + gap, a, f"cleaniv_{i.op_id}_{j.op_id}_{mc}")
+                    # materialized cleanout interval between op_i and op_j on mc
+                    cs = m.new_int_var(0, H, f"cleanstart_{op_i.op_id}_{op_j.op_id}_{mc}")
+                    ci = m.new_optional_interval_var(cs, gap, cs + gap, a, f"cleaniv_{op_i.op_id}_{op_j.op_id}_{mc}")
                     intervals_by_machine[mc].append(ci)
-                    m.add(cs >= ends[i.op_id]).only_enforce_if(a)
-                    m.add(cs + gap <= starts[j.op_id]).only_enforce_if(a)
+                    m.add(cs >= ends[op_i.op_id]).only_enforce_if(a)
+                    m.add(cs + gap <= starts[op_j.op_id]).only_enforce_if(a)
                     if night_active:
                         # cleanout must sit fully inside a day window [day_start, day_end)
-                        mod = m.new_int_var(0, 1439, f"cleanmod_{i.op_id}_{j.op_id}_{mc}")
+                        mod = m.new_int_var(0, 1439, f"cleanmod_{op_i.op_id}_{op_j.op_id}_{mc}")
                         m.add_modulo_equality(mod, cs, 1440)
                         m.add(mod >= night["day_start"]).only_enforce_if(a)
                         m.add(mod + gap <= night["day_end"]).only_enforce_if(a)
-                    cleanout_intervals.append((i.op_id, j.op_id, mc, a, cs))
+                    cleanout_intervals.append((op_i.op_id, op_j.op_id, mc, a, cs))
 
         m.add_circuit(circuit)
 

@@ -103,7 +103,7 @@ def build_scenario_ir() -> FCIR:
     digest = sha256_text(SHOP_RULES)
     for r in rules:
         for s in r.provenance.spans:
-            if s.role == "primary_normative":
+            if isinstance(s, TextSpan) and s.role == "primary_normative":
                 pos = anchor(s.quoted_text, SHOP_RULES)
                 assert pos is not None, f"{r.rule_id}: quote not in SOP: {s.quoted_text!r}"
                 s.char_start, s.char_end, s.source_sha256 = pos[0], pos[1], digest
