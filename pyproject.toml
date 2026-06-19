@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "feasible"
+version = "0.1.0"
+description = "Feasible — Constraint Intelligence Engine: demo loop v1 (Build A verified spine)"
+requires-python = ">=3.11"
+dependencies = [
+    "ortools>=9.10,<9.13",
+    "z3-solver>=4.12",
+    "pydantic>=2",
+    "openpyxl",
+    "pandas",
+    "pdfplumber",
+    "markdown-it-py",
+    "typer",
+    "cryptography",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "hypothesis", "mypy"]
+
+[project.scripts]
+feasible = "feasible.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["feasible"]
+
+[tool.pytest.ini_options]
+testpaths = ["spikes", "tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = false
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["ortools.*", "z3", "openpyxl.*", "pandas", "pdfplumber", "markdown_it.*"]
+ignore_missing_imports = true
