@@ -86,6 +86,20 @@ def test_cli_run_and_verify(tmp_path: Path) -> None:
     assert "OK" in res_verify.output
 
 
+def test_cli_certify_full_loop(tmp_path: Path) -> None:
+    runner = CliRunner()
+    plan_cert = tmp_path / "plan_cert.json"
+    rp_cert = tmp_path / "rule_pack_cert.json"
+    res = runner.invoke(app, ["certify", str(DATA), "--out", str(plan_cert), "--rulepack-out", str(rp_cert)])
+    assert res.exit_code == 0, res.output
+    assert "AUTO_BY_POLICY" in res.output  # §4.4 conflict resolved
+    assert "back-translation correction" in res.output  # §5.2 corrected
+    assert "two-cert digest binding: OK" in res.output
+    assert "Rule-Pack Cert verify: OK" in res.output
+    assert "Plan Cert verify     : OK" in res.output
+    assert plan_cert.exists() and rp_cert.exists()
+
+
 def test_cli_verify_detects_tamper(tmp_path: Path) -> None:
     runner = CliRunner()
     cert_path = tmp_path / "c.json"

@@ -110,6 +110,39 @@ def build_scenario_ir() -> FCIR:
     return FCIR(rules=rules, instance=inst)
 
 
+def make_permission_r44() -> Rule:
+    """The §4.4 permission (recorded extraction): Filler-1 may skip the cleanout
+    for Priority-1 orders — clashes with the §4.2/R-SETUP safety obligation."""
+    return Rule(
+        rule_id="R-4.4", kind="permission",
+        params={"target_rule": "R-SETUP", "scope_machine": "Filler-1", "scope_priority": 1},
+        severity=Severity.SOFT, clause_kind=ClauseKind.PERMISSION,
+        compile_mode=CompileMode.CONFLICT_ONLY, resolution_class="CUSTOMER_PRIORITY",
+        exception_mode=ExceptionMode.NONE,
+        provenance=Provenance(spans=[_span(
+            "Filler-1 may perform back-to-back family changes without an intervening cleanout")]),
+    )
+
+
+def make_mis_extraction_r52() -> Rule:
+    """The §5.2 recorded mis-extraction: the over-broad whole-line reading the
+    LLM produced (corrected to fill-op scope at the gate)."""
+    return Rule(
+        rule_id="R-5.2", kind="non_preemption", params={"scope": "whole_line"},
+        severity=Severity.HARD, clause_kind=ClauseKind.OBLIGATION,
+        compile_mode=CompileMode.PLAN_CONSTRAINT, resolution_class="EFFICIENCY",
+        provenance=Provenance(spans=[_span(
+            "Once an allergen order is started, the line must run it to completion before taking other work")]),
+    )
+
+
+def build_extracted_pack() -> FCIR:
+    """The 'messy extraction' candidate rule pack: golden rules + the seeded
+    §4.4 permission and the §5.2 wrong-scope mis-extraction."""
+    base = build_scenario_ir()
+    return FCIR(rules=[*base.rules, make_permission_r44(), make_mis_extraction_r52()], instance=base.instance)
+
+
 def generate_incumbent_b(ir: FCIR, max_seconds: float = 30.0):
     """A feasible-but-naive baseline: force the priority-1 labels LAST (so they
     ship late) and pay the resulting allergen cleanouts."""
