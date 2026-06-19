@@ -1,0 +1,432 @@
+{
+  "rules": [
+    {
+      "rule_id": "R-ROUTING",
+      "kind": "routing_precedence",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "",
+            "char_start": -1,
+            "char_end": -1,
+            "quoted_text": "Mix -> Fill -> Label routing (structural)",
+            "heading_path": "",
+            "role": "modeling_decision"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-NOOVERLAP",
+      "kind": "no_overlap",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "",
+            "char_start": -1,
+            "char_end": -1,
+            "quoted_text": "Per-machine no-overlap (structural)",
+            "heading_path": "",
+            "role": "modeling_decision"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-SETUP",
+      "kind": "setup_cleanout",
+      "params": {
+        "cleanout_minutes": 90,
+        "trigger_family": "Allergen"
+      },
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 530,
+            "char_end": 607,
+            "quoted_text": "a full 90-minute sanitation cleanout is required before the next product runs",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-MAINT",
+      "kind": "maintenance",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "HARD_AVAILABILITY_MAINTENANCE",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 156,
+            "char_end": 231,
+            "quoted_text": "Filler-2 is unavailable for scheduled maintenance every Tuesday 02:00-06:00",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-SHIFT",
+      "kind": "shift",
+      "params": {
+        "day_start": 0,
+        "day_end": 960,
+        "night_start": 960,
+        "night_end": 1440
+      },
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 70,
+            "char_end": 134,
+            "quoted_text": "The plant runs two shifts: day 06:00-22:00 and night 22:00-06:00",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-6.1-NIGHT-CLEANOUT",
+      "kind": "night_cleanout",
+      "params": {
+        "day_start": 0,
+        "day_end": 960,
+        "night_start": 960,
+        "night_end": 1440
+      },
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 632,
+            "char_end": 726,
+            "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    }
+  ],
+  "instance": {
+    "jobs": [
+      {
+        "id": "J1",
+        "product": "PeanutGold",
+        "family": "Allergen",
+        "qty": 100,
+        "due_date": 360,
+        "priority": 1
+      },
+      {
+        "id": "J2",
+        "product": "MildClassic",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 380,
+        "priority": 1
+      },
+      {
+        "id": "J3",
+        "product": "GardenHerb",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 760,
+        "priority": 2
+      },
+      {
+        "id": "J4",
+        "product": "FieryChipotle",
+        "family": "Spicy",
+        "qty": 100,
+        "due_date": 800,
+        "priority": 2
+      },
+      {
+        "id": "J5",
+        "product": "SesameSwirl",
+        "family": "Allergen",
+        "qty": 100,
+        "due_date": 1300,
+        "priority": 3
+      },
+      {
+        "id": "J6",
+        "product": "PlainTable",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 1340,
+        "priority": 3
+      }
+    ],
+    "operations": [
+      {
+        "op_id": "J1-mix",
+        "job_id": "J1",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 31,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J1-fill",
+        "job_id": "J1",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 17,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J1-label",
+        "job_id": "J1",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 110,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-mix",
+        "job_id": "J2",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 29,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-fill",
+        "job_id": "J2",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 13,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-label",
+        "job_id": "J2",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 100,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-mix",
+        "job_id": "J3",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 37,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-fill",
+        "job_id": "J3",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 19,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-label",
+        "job_id": "J3",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 90,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-mix",
+        "job_id": "J4",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 23,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-fill",
+        "job_id": "J4",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 11,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-label",
+        "job_id": "J4",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 80,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-mix",
+        "job_id": "J5",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 41,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-fill",
+        "job_id": "J5",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 23,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-label",
+        "job_id": "J5",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 130,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-mix",
+        "job_id": "J6",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 19,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-fill",
+        "job_id": "J6",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 7,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-label",
+        "job_id": "J6",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 70,
+        "op_class": "PROCESS"
+      }
+    ],
+    "machines": [
+      "Mixer-A",
+      "Mixer-B",
+      "Filler-1",
+      "Filler-2",
+      "Labeler"
+    ],
+    "setup_matrix": {
+      "Allergen|Standard": 90,
+      "Allergen|Spicy": 90
+    },
+    "maintenance": [
+      [
+        "Filler-2",
+        1200,
+        1440
+      ]
+    ],
+    "horizon": 4320
+  }
+}

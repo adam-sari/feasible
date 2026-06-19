@@ -1,0 +1,90 @@
+{
+  "assignments": {
+    "J1-mix": [
+      112,
+      "Mixer-B"
+    ],
+    "J1-fill": [
+      143,
+      "Filler-2"
+    ],
+    "J1-label": [
+      448,
+      "Labeler"
+    ],
+    "J2-mix": [
+      0,
+      "Mixer-B"
+    ],
+    "J2-fill": [
+      29,
+      "Filler-2"
+    ],
+    "J2-label": [
+      648,
+      "Labeler"
+    ],
+    "J3-mix": [
+      0,
+      "Mixer-A"
+    ],
+    "J3-fill": [
+      37,
+      "Filler-1"
+    ],
+    "J3-label": [
+      148,
+      "Labeler"
+    ],
+    "J4-mix": [
+      29,
+      "Mixer-B"
+    ],
+    "J4-fill": [
+      52,
+      "Filler-2"
+    ],
+    "J4-label": [
+      238,
+      "Labeler"
+    ],
+    "J5-mix": [
+      71,
+      "Mixer-B"
+    ],
+    "J5-fill": [
+      112,
+      "Filler-2"
+    ],
+    "J5-label": [
+      318,
+      "Labeler"
+    ],
+    "J6-mix": [
+      52,
+      "Mixer-B"
+    ],
+    "J6-fill": [
+      71,
+      "Filler-2"
+    ],
+    "J6-label": [
+      78,
+      "Labeler"
+    ]
+  },
+  "cleanouts": [
+    [
+      "Labeler",
+      558,
+      648,
+      "cleanout J1-label->J2-label"
+    ],
+    [
+      "Labeler",
+      1050,
+      1140,
+      "manual cleanout J1->J2 (23:30)"
+    ]
+  ]
+}
