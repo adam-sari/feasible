@@ -1,0 +1,86 @@
+{
+  "rules": [
+    {
+      "rule_id": "R-ROUTING",
+      "kind": "routing_precedence",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "Mix -> Fill -> Label routing (structural)", "role": "modeling_decision"}]}
+    },
+    {
+      "rule_id": "R-NOOVERLAP",
+      "kind": "no_overlap",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "Per-machine no-overlap (structural)", "role": "modeling_decision"}]}
+    },
+    {
+      "rule_id": "R-SETUP",
+      "kind": "setup_cleanout",
+      "params": {"cleanout_minutes": 90, "trigger_family": "Allergen"},
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "a full 90-minute sanitation cleanout is required before the next product runs", "role": "primary_normative"}]}
+    },
+    {
+      "rule_id": "R-MAINT",
+      "kind": "maintenance",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "HARD_AVAILABILITY_MAINTENANCE",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "Filler-2 is unavailable for scheduled maintenance every Tuesday 02:00-06:00", "role": "primary_normative"}]}
+    },
+    {
+      "rule_id": "R-SHIFT",
+      "kind": "shift",
+      "params": {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440},
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "The plant runs two shifts: day 06:00-22:00 and night 22:00-06:00", "role": "primary_normative"}]}
+    },
+    {
+      "rule_id": "R-6.1-NIGHT-CLEANOUT",
+      "kind": "night_cleanout",
+      "params": {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "provenance": {"spans": [{"kind": "text", "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights", "role": "primary_normative"}]}
+    }
+  ],
+  "instance": {
+    "jobs": [
+      {"id": "J1", "product": "PeanutSauce", "family": "Allergen", "qty": 1, "due_date": 1440, "priority": 1},
+      {"id": "J2", "product": "MildSauce", "family": "Standard", "qty": 1, "due_date": 1440, "priority": 2},
+      {"id": "J3", "product": "PlainSauce", "family": "Standard", "qty": 1, "due_date": 1440, "priority": 3}
+    ],
+    "operations": [
+      {"op_id": "J1-mix", "job_id": "J1", "seq": 0, "eligible_machines": ["Mixer-A", "Mixer-B"], "duration": 31},
+      {"op_id": "J1-fill", "job_id": "J1", "seq": 1, "eligible_machines": ["Filler-1", "Filler-2"], "duration": 19},
+      {"op_id": "J1-label", "job_id": "J1", "seq": 2, "eligible_machines": ["Labeler"], "duration": 11},
+      {"op_id": "J2-mix", "job_id": "J2", "seq": 0, "eligible_machines": ["Mixer-A", "Mixer-B"], "duration": 29},
+      {"op_id": "J2-fill", "job_id": "J2", "seq": 1, "eligible_machines": ["Filler-1", "Filler-2"], "duration": 17},
+      {"op_id": "J2-label", "job_id": "J2", "seq": 2, "eligible_machines": ["Labeler"], "duration": 7},
+      {"op_id": "J3-mix", "job_id": "J3", "seq": 0, "eligible_machines": ["Mixer-A", "Mixer-B"], "duration": 23},
+      {"op_id": "J3-fill", "job_id": "J3", "seq": 1, "eligible_machines": ["Filler-1", "Filler-2"], "duration": 13},
+      {"op_id": "J3-label", "job_id": "J3", "seq": 2, "eligible_machines": ["Labeler"], "duration": 5}
+    ],
+    "machines": ["Mixer-A", "Mixer-B", "Filler-1", "Filler-2", "Labeler"],
+    "setup_matrix": {"Allergen|Standard": 90, "Allergen|Spicy": 90},
+    "maintenance": [["Filler-2", 1200, 1440]],
+    "horizon": 2880
+  }
+}
