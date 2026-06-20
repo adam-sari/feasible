@@ -235,28 +235,113 @@ def public_key_hex_of(public_key: Ed25519PublicKey) -> str:
     return public_key.public_bytes_raw().hex()
 
 
+def _gantt_html(plan_cert: dict) -> str:
+    inst = plan_cert["instance"]
+    plan = plan_cert["plan"]
+    dur = {o["op_id"]: o["duration"] for o in inst["operations"]}
+    fam_of_job = {j["id"]: j["family"] for j in inst["jobs"]}
+    job_of_op = {o["op_id"]: o["job_id"] for o in inst["operations"]}
+    colors = {"Allergen": "#d9534f", "Standard": "#5bc0de", "Spicy": "#f0ad4e"}
+
+    ends = [s + dur[o] for o, (s, _m) in plan["assignments"].items()]
+    ends += [c[2] for c in plan["cleanouts"]]
+    max_t = max(ends) if ends else 1
+    span = max(max_t, 1)
+
+    def pct(x: int) -> float:
+        return round(100.0 * x / span, 3)
+
+    # night shading bands [960,1440), [2400,2880), ...
+    bands = ""
+    k = 0
+    while 960 + k * 1440 < span:
+        a = 960 + k * 1440
+        b = min(1440 + k * 1440, span)
+        bands += f'<div class="night" style="left:{pct(a)}%;width:{pct(b - a)}%"></div>'
+        k += 1
+
+    rows = ""
+    for mc in inst["machines"]:
+        bars = ""
+        for op, (s, m) in plan["assignments"].items():
+            if m != mc:
+                continue
+            fam = fam_of_job[job_of_op[op]]
+            bars += (f'<div class="bar" style="left:{pct(s)}%;width:{pct(dur[op])}%;'
+                     f'background:{colors.get(fam, "#bbb")}" title="{op} [{s},{s + dur[op]})">{op}</div>')
+        for (cm, cs, ce, reason) in plan["cleanouts"]:
+            if cm == mc:
+                bars += (f'<div class="bar clean" style="left:{pct(cs)}%;width:{pct(ce - cs)}%" '
+                         f'title="{reason} [{cs},{ce})">CLEANOUT</div>')
+        rows += f'<div class="row"><div class="mlabel">{mc}</div><div class="track">{bands}{bars}</div></div>'
+    return rows
+
+
 def render_html(plan_cert: dict) -> str:
     import json
 
-    obj = plan_cert["claims"]["optimality"]["objective"]["value"]
-    feas = plan_cert["claims"]["feasibility"]["checker"]["value"]
+    c = plan_cert["claims"]
+    obj = c["optimality"]["objective"]["value"]
+    feas = c["feasibility"]["checker"]["value"]
+    z3 = c["feasibility"]["z3_attest"]["value"]
+    opt_label = c["optimality"]["label"]["value"]
+    tripwire = c["optimality"]["tripwire_passed"]["value"]
     inc_a = plan_cert["incumbent_A_failure"]
-    span_q = ""
-    if inc_a.get("span"):
-        span_q = inc_a["span"].get("quoted_text", "")
+    span_q = inc_a["span"].get("quoted_text", "") if inc_a.get("span") else ""
+    kpi = plan_cert["kpi_vs_incumbent_B"]
+
+    def kpi_row(label: str, key: str) -> str:
+        o, b = kpi[key]["optimized"], kpi[key]["incumbent_b"]
+        win = "win" if o <= b else ""
+        return f'<tr><td>{label}</td><td class="{win}">{o}</td><td>{b}</td></tr>'
+
     payload_json = json.dumps(plan_cert, indent=2)
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Feasible Plan Certificate</title>
-<style>body{{font-family:system-ui,sans-serif;margin:2rem;max-width:60rem}}
-.claim{{border:1px solid #ccc;border-radius:8px;padding:1rem;margin:.5rem 0}}
-.pass{{color:#0a0}} .fail{{color:#c00}} pre{{background:#f6f6f6;padding:1rem;overflow:auto}}</style>
-</head><body>
+<style>
+body{{font-family:system-ui,sans-serif;margin:2rem;max-width:64rem;color:#222}}
+h1{{margin-bottom:0}} .sub{{color:#666;margin-top:.2rem}}
+.claim{{border:1px solid #ddd;border-radius:8px;padding:.8rem 1rem;margin:.5rem 0;background:#fafafa}}
+.pass{{color:#0a7a0a;font-weight:600}} .fail{{color:#c00;font-weight:600}}
+.gotcha{{border-left:4px solid #d9534f;background:#fff5f5}}
+table{{border-collapse:collapse;margin:.5rem 0}} td,th{{border:1px solid #ddd;padding:.3rem .7rem;text-align:right}}
+th:first-child,td:first-child{{text-align:left}} .win{{color:#0a7a0a;font-weight:600}}
+.gantt{{margin:1rem 0}} .row{{display:flex;align-items:center;margin:3px 0}}
+.mlabel{{width:90px;font-size:.8rem;color:#444}} .track{{position:relative;flex:1;height:26px;background:#f0f0f0;border-radius:4px;overflow:hidden}}
+.night{{position:absolute;top:0;height:100%;background:repeating-linear-gradient(45deg,#e6e6f5,#e6e6f5 6px,#dadaf0 6px,#dadaf0 12px)}}
+.bar{{position:absolute;top:2px;height:22px;border-radius:3px;color:#fff;font-size:.65rem;line-height:22px;text-align:center;overflow:hidden;white-space:nowrap}}
+.bar.clean{{background:repeating-linear-gradient(45deg,#444,#444 4px,#666 4px,#666 8px);color:#fff}}
+details{{margin-top:1rem}} pre{{background:#f6f6f6;padding:1rem;overflow:auto;font-size:.7rem;max-height:30rem}}
+.legend span{{display:inline-block;margin-right:1rem;font-size:.8rem}} .sw{{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;margin-right:3px}}
+</style></head><body>
 <h1>Feasible — Plan Certificate</h1>
-<div class="claim"><b>Feasibility:</b> <span class="{ 'pass' if feas=='PASS' else 'fail' }">{feas}</span>
-(independently re-checkable offline via <code>feasible verify</code>)</div>
-<div class="claim"><b>Optimality:</b> objective = {obj} — {plan_cert['claims']['optimality']['label']['value']}</div>
-<div class="claim"><b>Gotcha (incumbent A):</b> violated {inc_a.get('violated_rule_ref')} —
-cited clause: <i>"{span_q}"</i></div>
-<h2>Signed canonical JSON (source of truth)</h2>
-<pre>{payload_json}</pre>
+<div class="sub">generate + verify + certify · independently re-checkable offline via <code>feasible verify</code></div>
+
+<div class="claim"><b>① Formalization:</b> {c['formalization']['n_hard_rules']['value']} approved hard rules
+(rule-pack digest <code>{plan_cert['rule_pack_ref']['rule_pack_digest'][:16]}…</code>)</div>
+<div class="claim"><b>② Feasibility:</b> checker <span class="{'pass' if feas=='PASS' else 'fail'}">{feas}</span>
+· Z3 {z3} (two independent verifiers)</div>
+<div class="claim"><b>③ Optimality:</b> objective (weighted_tardiness, changeover) = {obj} — {opt_label}; tripwire_passed={tripwire}</div>
+
+<div class="claim gotcha"><b>🎯 Gotcha — incumbent A rejected:</b> violated <code>{inc_a.get('violated_rule_ref')}</code><br>
+cited SOP clause: <i>"{span_q}"</i><br>
+counter-witness: cleanout at minute {inc_a.get('counter_witness', {}).get('cleanout_start','?')} (minute-of-day {inc_a.get('counter_witness', {}).get('minute_of_day','?')} = night)</div>
+
+<h3>KPI vs incumbent B (feasible-but-naive baseline)</h3>
+<table><tr><th>metric</th><th>Feasible</th><th>incumbent B</th></tr>
+{kpi_row('priority-weighted tardiness', 'weighted_tardiness')}
+{kpi_row('late priority orders', 'late_priority_orders')}
+{kpi_row('total changeover (min)', 'total_changeover_time')}
+</table>
+
+<h3>Optimized schedule</h3>
+<div class="legend"><span><span class="sw" style="background:#d9534f"></span>Allergen</span>
+<span><span class="sw" style="background:#5bc0de"></span>Standard</span>
+<span><span class="sw" style="background:#f0ad4e"></span>Spicy</span>
+<span><span class="sw" style="background:#555"></span>Cleanout</span>
+<span><span class="sw night" style="width:24px"></span>night shift [22:00–06:00)</span></div>
+<div class="gantt">{_gantt_html(plan_cert)}</div>
+
+<details><summary>Signed canonical JSON (source of truth — what <code>feasible verify</code> re-checks)</summary>
+<pre>{payload_json}</pre></details>
 </body></html>"""

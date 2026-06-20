@@ -400,9 +400,9 @@
     "signatures": [
       {
         "keyid": "",
-        "sig": "wb1Yx0xSGnDmHA6aX5fsI7z0HaunUMsO17i/HKTJynrgW9cI2vpZ1Mk1ewlt80jPy1y3AFXKW3Gef7ehMsePAg=="
+        "sig": "VH2pTdpr7ZhrcnOH5UBMywVRemrk9X075cgmQcdtxpw2H6jWj9pQJsi886QZROJ7xVDWOqCoHNSg3g+HuBxJDQ=="
       }
     ],
-    "public_key_hex": "24329573f6ee0934dfe2308b68014ee1398c0ad0016548267703dab1cc4bdfb8"
+    "public_key_hex": "7829519d2f3fa646f358147044a73d0f5e46a061eb45db502867be65bfba4ac4"
   }
 }

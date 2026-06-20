@@ -1,0 +1,653 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Feasible Plan Certificate</title>
+<style>body{font-family:system-ui,sans-serif;margin:2rem;max-width:60rem}
+.claim{border:1px solid #ccc;border-radius:8px;padding:1rem;margin:.5rem 0}
+.pass{color:#0a0} .fail{color:#c00} pre{background:#f6f6f6;padding:1rem;overflow:auto}</style>
+</head><body>
+<h1>Feasible — Plan Certificate</h1>
+<div class="claim"><b>Feasibility:</b> <span class="pass">PASS</span>
+(independently re-checkable offline via <code>feasible verify</code>)</div>
+<div class="claim"><b>Optimality:</b> objective = [0, 90] — optimal per CP-SAT, same-engine tripwire</div>
+<div class="claim"><b>Gotcha (incumbent A):</b> violated R-6.1-NIGHT-CLEANOUT —
+cited clause: <i>"Cleanouts may only be performed during the day shift; the sanitation crew does not work nights"</i></div>
+<h2>Signed canonical JSON (source of truth)</h2>
+<pre>{
+  "schema_version": "feasible.plan_cert.v1",
+  "plan_cert_id": "plan-cert-0001",
+  "rule_pack_ref": {
+    "rule_pack_id": "rule-pack-golden",
+    "rule_pack_digest": "36f9de928f70b2af25fa42aad61a4aaa1a52c1cd4e6ef27aad368c94c91002fc",
+    "rule_pack_cert_signature_ref": null
+  },
+  "active_rule_set_for_plan": {
+    "active_rule_ids": [
+      "R-6.1-NIGHT-CLEANOUT",
+      "R-MAINT",
+      "R-NOOVERLAP",
+      "R-ROUTING",
+      "R-SETUP",
+      "R-SHIFT"
+    ],
+    "dropped": [],
+    "active_rule_set_digest": "d1c9e94457ee084bbb52e94c579a194c6ffa772c07ee7a6fdc333b5d39c07d31"
+  },
+  "instance_ref": {
+    "instance_digest": "eb39e10e2bb35e2745648d585414e191ae5f547ae5b5d71fec13694a02b818cd"
+  },
+  "instance": {
+    "jobs": [
+      {
+        "id": "J1",
+        "product": "PeanutGold",
+        "family": "Allergen",
+        "qty": 100,
+        "due_date": 360,
+        "priority": 1
+      },
+      {
+        "id": "J2",
+        "product": "MildClassic",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 380,
+        "priority": 1
+      },
+      {
+        "id": "J3",
+        "product": "GardenHerb",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 760,
+        "priority": 2
+      },
+      {
+        "id": "J4",
+        "product": "FieryChipotle",
+        "family": "Spicy",
+        "qty": 100,
+        "due_date": 800,
+        "priority": 2
+      },
+      {
+        "id": "J5",
+        "product": "SesameSwirl",
+        "family": "Allergen",
+        "qty": 100,
+        "due_date": 1300,
+        "priority": 3
+      },
+      {
+        "id": "J6",
+        "product": "PlainTable",
+        "family": "Standard",
+        "qty": 100,
+        "due_date": 1340,
+        "priority": 3
+      }
+    ],
+    "operations": [
+      {
+        "op_id": "J1-mix",
+        "job_id": "J1",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 31,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J1-fill",
+        "job_id": "J1",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 17,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J1-label",
+        "job_id": "J1",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 110,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-mix",
+        "job_id": "J2",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 29,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-fill",
+        "job_id": "J2",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 13,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J2-label",
+        "job_id": "J2",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 100,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-mix",
+        "job_id": "J3",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 37,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-fill",
+        "job_id": "J3",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 19,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J3-label",
+        "job_id": "J3",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 90,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-mix",
+        "job_id": "J4",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 23,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-fill",
+        "job_id": "J4",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 11,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J4-label",
+        "job_id": "J4",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 80,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-mix",
+        "job_id": "J5",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 41,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-fill",
+        "job_id": "J5",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 23,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J5-label",
+        "job_id": "J5",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 130,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-mix",
+        "job_id": "J6",
+        "seq": 0,
+        "eligible_machines": [
+          "Mixer-A",
+          "Mixer-B"
+        ],
+        "duration": 19,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-fill",
+        "job_id": "J6",
+        "seq": 1,
+        "eligible_machines": [
+          "Filler-1",
+          "Filler-2"
+        ],
+        "duration": 7,
+        "op_class": "PROCESS"
+      },
+      {
+        "op_id": "J6-label",
+        "job_id": "J6",
+        "seq": 2,
+        "eligible_machines": [
+          "Labeler"
+        ],
+        "duration": 70,
+        "op_class": "PROCESS"
+      }
+    ],
+    "machines": [
+      "Mixer-A",
+      "Mixer-B",
+      "Filler-1",
+      "Filler-2",
+      "Labeler"
+    ],
+    "setup_matrix": {
+      "Allergen|Standard": 90,
+      "Allergen|Spicy": 90
+    },
+    "maintenance": [
+      [
+        "Filler-2",
+        1200,
+        1440
+      ]
+    ],
+    "horizon": 4320
+  },
+  "rules": [
+    {
+      "rule_id": "R-ROUTING",
+      "kind": "routing_precedence",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "",
+            "char_start": -1,
+            "char_end": -1,
+            "quoted_text": "Mix -> Fill -> Label routing (structural)",
+            "heading_path": "",
+            "role": "modeling_decision"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-NOOVERLAP",
+      "kind": "no_overlap",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "",
+            "char_start": -1,
+            "char_end": -1,
+            "quoted_text": "Per-machine no-overlap (structural)",
+            "heading_path": "",
+            "role": "modeling_decision"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-SETUP",
+      "kind": "setup_cleanout",
+      "params": {
+        "cleanout_minutes": 90,
+        "trigger_family": "Allergen"
+      },
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 530,
+            "char_end": 607,
+            "quoted_text": "a full 90-minute sanitation cleanout is required before the next product runs",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-MAINT",
+      "kind": "maintenance",
+      "params": {},
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "HARD_AVAILABILITY_MAINTENANCE",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 156,
+            "char_end": 231,
+            "quoted_text": "Filler-2 is unavailable for scheduled maintenance every Tuesday 02:00-06:00",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-SHIFT",
+      "kind": "shift",
+      "params": {
+        "day_start": 0,
+        "day_end": 960,
+        "night_start": 960,
+        "night_end": 1440
+      },
+      "severity": "HARD",
+      "clause_kind": "OBLIGATION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "EFFICIENCY",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 70,
+            "char_end": 134,
+            "quoted_text": "The plant runs two shifts: day 06:00-22:00 and night 22:00-06:00",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "R-6.1-NIGHT-CLEANOUT",
+      "kind": "night_cleanout",
+      "params": {
+        "day_start": 0,
+        "day_end": 960,
+        "night_start": 960,
+        "night_end": 1440
+      },
+      "severity": "HARD",
+      "clause_kind": "PROHIBITION",
+      "compile_mode": "PLAN_CONSTRAINT",
+      "resolution_class": "SAFETY_SANITATION",
+      "exception_mode": "NONE",
+      "overrides": [],
+      "trust_tier": "T4",
+      "provenance": {
+        "spans": [
+          {
+            "kind": "text",
+            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "char_start": 632,
+            "char_end": 726,
+            "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
+            "heading_path": "",
+            "role": "primary_normative"
+          }
+        ]
+      }
+    }
+  ],
+  "plan": {
+    "assignments": {
+      "J1-mix": [
+        19,
+        "Mixer-B"
+      ],
+      "J1-fill": [
+        100,
+        "Filler-1"
+      ],
+      "J1-label": [
+        249,
+        "Labeler"
+      ],
+      "J2-mix": [
+        37,
+        "Mixer-A"
+      ],
+      "J2-fill": [
+        66,
+        "Filler-1"
+      ],
+      "J2-label": [
+        79,
+        "Labeler"
+      ],
+      "J3-mix": [
+        0,
+        "Mixer-A"
+      ],
+      "J3-fill": [
+        37,
+        "Filler-1"
+      ],
+      "J3-label": [
+        529,
+        "Labeler"
+      ],
+      "J4-mix": [
+        66,
+        "Mixer-A"
+      ],
+      "J4-fill": [
+        89,
+        "Filler-1"
+      ],
+      "J4-label": [
+        449,
+        "Labeler"
+      ],
+      "J5-mix": [
+        89,
+        "Mixer-A"
+      ],
+      "J5-fill": [
+        130,
+        "Filler-1"
+      ],
+      "J5-label": [
+        619,
+        "Labeler"
+      ],
+      "J6-mix": [
+        0,
+        "Mixer-B"
+      ],
+      "J6-fill": [
+        19,
+        "Filler-1"
+      ],
+      "J6-label": [
+        179,
+        "Labeler"
+      ]
+    },
+    "cleanouts": [
+      [
+        "Labeler",
+        359,
+        449,
+        "cleanout J1-label->J4-label"
+      ]
+    ]
+  },
+  "claims": {
+    "formalization": {
+      "rule_pack_digest_ref": {
+        "value": "36f9de928f70b2af25fa42aad61a4aaa1a52c1cd4e6ef27aad368c94c91002fc",
+        "provenance": "rule_pack_digest_ref"
+      },
+      "n_hard_rules": {
+        "value": 6,
+        "provenance": "ledger"
+      },
+      "rules_grounded_in_source": {
+        "value": 4,
+        "provenance": "ledger"
+      }
+    },
+    "feasibility": {
+      "checker": {
+        "value": "PASS",
+        "provenance": "checker"
+      },
+      "z3_attest": {
+        "value": "attested",
+        "provenance": "checker"
+      }
+    },
+    "optimality": {
+      "optimal_per_cpsat": {
+        "value": true,
+        "provenance": "solver"
+      },
+      "gap_bps": {
+        "value": 0,
+        "provenance": "solver"
+      },
+      "objective": {
+        "value": [
+          0,
+          90
+        ],
+        "provenance": "objective_recompute"
+      },
+      "tripwire_passed": {
+        "value": true,
+        "provenance": "solver"
+      },
+      "label": {
+        "value": "optimal per CP-SAT, same-engine tripwire",
+        "provenance": "solver"
+      }
+    }
+  },
+  "kpi_vs_incumbent_B": {
+    "weighted_tardiness": {
+      "optimized": 0,
+      "incumbent_b": 1698
+    },
+    "late_priority_orders": {
+      "optimized": 0,
+      "incumbent_b": 2
+    },
+    "total_changeover_time": {
+      "optimized": 90,
+      "incumbent_b": 90
+    }
+  },
+  "incumbent_A_failure": {
+    "violated_rule_ref": "R-6.1-NIGHT-CLEANOUT",
+    "span": {
+      "kind": "text",
+      "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+      "char_start": 632,
+      "char_end": 726,
+      "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
+      "heading_path": "",
+      "role": "primary_normative"
+    },
+    "counter_witness": {
+      "machine": "Labeler",
+      "cleanout_start": 1050,
+      "minute_of_day": 1050,
+      "op_class": "SANITATION",
+      "reason": "manual cleanout J1->J2 (23:30)"
+    }
+  },
+  "trust_boundary": {
+    "verification": "IR-relative: the plan satisfies the approved IR; the source->IR edge is closed by the extraction-independence layer + human gate (Build B).",
+    "optimality": "CP-SAT self-reported gap + a SAME-ENGINE tripwire; not independently proven (MiniZinc->Chuffed is the v1.1 upgrade).",
+    "shared_convention": "compiler and checker share only the canonical (start, stable_op_id) order.",
+    "semantic_correlation_residual": "a misreading shared by extraction + reviewer + checker is not caught by v1."
+  },
+  "signature": {
+    "payload": "eyJhY3RpdmVfcnVsZV9zZXRfZm9yX3BsYW4iOnsiYWN0aXZlX3J1bGVfaWRzIjpbIlItNi4xLU5JR0hULUNMRUFOT1VUIiwiUi1NQUlOVCIsIlItTk9PVkVSTEFQIiwiUi1ST1VUSU5HIiwiUi1TRVRVUCIsIlItU0hJRlQiXSwiYWN0aXZlX3J1bGVfc2V0X2RpZ2VzdCI6ImQxYzllOTQ0NTdlZTA4NGJiYjUyZTk0YzU3OWExOTRjNmZmYTc3MmMwN2VlN2E2ZmRjMzMzYjVkMzljMDdkMzEiLCJkcm9wcGVkIjpbXX0sImNsYWltcyI6eyJmZWFzaWJpbGl0eSI6eyJjaGVja2VyIjp7InByb3ZlbmFuY2UiOiJjaGVja2VyIiwidmFsdWUiOiJQQVNTIn0sInozX2F0dGVzdCI6eyJwcm92ZW5hbmNlIjoiY2hlY2tlciIsInZhbHVlIjoiYXR0ZXN0ZWQifX0sImZvcm1hbGl6YXRpb24iOnsibl9oYXJkX3J1bGVzIjp7InByb3ZlbmFuY2UiOiJsZWRnZXIiLCJ2YWx1ZSI6Nn0sInJ1bGVfcGFja19kaWdlc3RfcmVmIjp7InByb3ZlbmFuY2UiOiJydWxlX3BhY2tfZGlnZXN0X3JlZiIsInZhbHVlIjoiMzZmOWRlOTI4ZjcwYjJhZjI1ZmE0MmFhZDYxYTRhYWExYTUyYzFjZDRlNmVmMjdhYWQzNjhjOTRjOTEwMDJmYyJ9LCJydWxlc19ncm91bmRlZF9pbl9zb3VyY2UiOnsicHJvdmVuYW5jZSI6ImxlZGdlciIsInZhbHVlIjo0fX0sIm9wdGltYWxpdHkiOnsiZ2FwX2JwcyI6eyJwcm92ZW5hbmNlIjoic29sdmVyIiwidmFsdWUiOjB9LCJsYWJlbCI6eyJwcm92ZW5hbmNlIjoic29sdmVyIiwidmFsdWUiOiJvcHRpbWFsIHBlciBDUC1TQVQsIHNhbWUtZW5naW5lIHRyaXB3aXJlIn0sIm9iamVjdGl2ZSI6eyJwcm92ZW5hbmNlIjoib2JqZWN0aXZlX3JlY29tcHV0ZSIsInZhbHVlIjpbMCw5MF19LCJvcHRpbWFsX3Blcl9jcHNhdCI6eyJwcm92ZW5hbmNlIjoic29sdmVyIiwidmFsdWUiOnRydWV9LCJ0cmlwd2lyZV9wYXNzZWQiOnsicHJvdmVuYW5jZSI6InNvbHZlciIsInZhbHVlIjp0cnVlfX19LCJpbmN1bWJlbnRfQV9mYWlsdXJlIjp7ImNvdW50ZXJfd2l0bmVzcyI6eyJjbGVhbm91dF9zdGFydCI6MTA1MCwibWFjaGluZSI6IkxhYmVsZXIiLCJtaW51dGVfb2ZfZGF5IjoxMDUwLCJvcF9jbGFzcyI6IlNBTklUQVRJT04iLCJyZWFzb24iOiJtYW51YWwgY2xlYW5vdXQgSjEtPkoyICgyMzozMCkifSwic3BhbiI6eyJjaGFyX2VuZCI6NzI2LCJjaGFyX3N0YXJ0Ijo2MzIsImhlYWRpbmdfcGF0aCI6IiIsImtpbmQiOiJ0ZXh0IiwicXVvdGVkX3RleHQiOiJDbGVhbm91dHMgbWF5IG9ubHkgYmUgcGVyZm9ybWVkIGR1cmluZyB0aGUgZGF5IHNoaWZ0OyB0aGUgc2FuaXRhdGlvbiBjcmV3IGRvZXMgbm90IHdvcmsgbmlnaHRzIiwicm9sZSI6InByaW1hcnlfbm9ybWF0aXZlIiwic291cmNlX3NoYTI1NiI6ImQ5MTY3M2UxMTkzYjMzZDQ5YWQ5NjJhODY3OGQ2MTI5MGU2MmFhYmMwNjJjMTkxZGU3MjA3NGFlNDEwZjUwNjUifSwidmlvbGF0ZWRfcnVsZV9yZWYiOiJSLTYuMS1OSUdIVC1DTEVBTk9VVCJ9LCJpbnN0YW5jZSI6eyJob3Jpem9uIjo0MzIwLCJqb2JzIjpbeyJkdWVfZGF0ZSI6MzYwLCJmYW1pbHkiOiJBbGxlcmdlbiIsImlkIjoiSjEiLCJwcmlvcml0eSI6MSwicHJvZHVjdCI6IlBlYW51dEdvbGQiLCJxdHkiOjEwMH0seyJkdWVfZGF0ZSI6MzgwLCJmYW1pbHkiOiJTdGFuZGFyZCIsImlkIjoiSjIiLCJwcmlvcml0eSI6MSwicHJvZHVjdCI6Ik1pbGRDbGFzc2ljIiwicXR5IjoxMDB9LHsiZHVlX2RhdGUiOjc2MCwiZmFtaWx5IjoiU3RhbmRhcmQiLCJpZCI6IkozIiwicHJpb3JpdHkiOjIsInByb2R1Y3QiOiJHYXJkZW5IZXJiIiwicXR5IjoxMDB9LHsiZHVlX2RhdGUiOjgwMCwiZmFtaWx5IjoiU3BpY3kiLCJpZCI6Iko0IiwicHJpb3JpdHkiOjIsInByb2R1Y3QiOiJGaWVyeUNoaXBvdGxlIiwicXR5IjoxMDB9LHsiZHVlX2RhdGUiOjEzMDAsImZhbWlseSI6IkFsbGVyZ2VuIiwiaWQiOiJKNSIsInByaW9yaXR5IjozLCJwcm9kdWN0IjoiU2VzYW1lU3dpcmwiLCJxdHkiOjEwMH0seyJkdWVfZGF0ZSI6MTM0MCwiZmFtaWx5IjoiU3RhbmRhcmQiLCJpZCI6Iko2IiwicHJpb3JpdHkiOjMsInByb2R1Y3QiOiJQbGFpblRhYmxlIiwicXR5IjoxMDB9XSwibWFjaGluZXMiOlsiTWl4ZXItQSIsIk1peGVyLUIiLCJGaWxsZXItMSIsIkZpbGxlci0yIiwiTGFiZWxlciJdLCJtYWludGVuYW5jZSI6W1siRmlsbGVyLTIiLDEyMDAsMTQ0MF1dLCJvcGVyYXRpb25zIjpbeyJkdXJhdGlvbiI6MzEsImVsaWdpYmxlX21hY2hpbmVzIjpbIk1peGVyLUEiLCJNaXhlci1CIl0sImpvYl9pZCI6IkoxIiwib3BfY2xhc3MiOiJQUk9DRVNTIiwib3BfaWQiOiJKMS1taXgiLCJzZXEiOjB9LHsiZHVyYXRpb24iOjE3LCJlbGlnaWJsZV9tYWNoaW5lcyI6WyJGaWxsZXItMSIsIkZpbGxlci0yIl0sImpvYl9pZCI6IkoxIiwib3BfY2xhc3MiOiJQUk9DRVNTIiwib3BfaWQiOiJKMS1maWxsIiwic2VxIjoxfSx7ImR1cmF0aW9uIjoxMTAsImVsaWdpYmxlX21hY2hpbmVzIjpbIkxhYmVsZXIiXSwiam9iX2lkIjoiSjEiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6IkoxLWxhYmVsIiwic2VxIjoyfSx7ImR1cmF0aW9uIjoyOSwiZWxpZ2libGVfbWFjaGluZXMiOlsiTWl4ZXItQSIsIk1peGVyLUIiXSwiam9iX2lkIjoiSjIiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6IkoyLW1peCIsInNlcSI6MH0seyJkdXJhdGlvbiI6MTMsImVsaWdpYmxlX21hY2hpbmVzIjpbIkZpbGxlci0xIiwiRmlsbGVyLTIiXSwiam9iX2lkIjoiSjIiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6IkoyLWZpbGwiLCJzZXEiOjF9LHsiZHVyYXRpb24iOjEwMCwiZWxpZ2libGVfbWFjaGluZXMiOlsiTGFiZWxlciJdLCJqb2JfaWQiOiJKMiIsIm9wX2NsYXNzIjoiUFJPQ0VTUyIsIm9wX2lkIjoiSjItbGFiZWwiLCJzZXEiOjJ9LHsiZHVyYXRpb24iOjM3LCJlbGlnaWJsZV9tYWNoaW5lcyI6WyJNaXhlci1BIiwiTWl4ZXItQiJdLCJqb2JfaWQiOiJKMyIsIm9wX2NsYXNzIjoiUFJPQ0VTUyIsIm9wX2lkIjoiSjMtbWl4Iiwic2VxIjowfSx7ImR1cmF0aW9uIjoxOSwiZWxpZ2libGVfbWFjaGluZXMiOlsiRmlsbGVyLTEiLCJGaWxsZXItMiJdLCJqb2JfaWQiOiJKMyIsIm9wX2NsYXNzIjoiUFJPQ0VTUyIsIm9wX2lkIjoiSjMtZmlsbCIsInNlcSI6MX0seyJkdXJhdGlvbiI6OTAsImVsaWdpYmxlX21hY2hpbmVzIjpbIkxhYmVsZXIiXSwiam9iX2lkIjoiSjMiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6IkozLWxhYmVsIiwic2VxIjoyfSx7ImR1cmF0aW9uIjoyMywiZWxpZ2libGVfbWFjaGluZXMiOlsiTWl4ZXItQSIsIk1peGVyLUIiXSwiam9iX2lkIjoiSjQiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6Iko0LW1peCIsInNlcSI6MH0seyJkdXJhdGlvbiI6MTEsImVsaWdpYmxlX21hY2hpbmVzIjpbIkZpbGxlci0xIiwiRmlsbGVyLTIiXSwiam9iX2lkIjoiSjQiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6Iko0LWZpbGwiLCJzZXEiOjF9LHsiZHVyYXRpb24iOjgwLCJlbGlnaWJsZV9tYWNoaW5lcyI6WyJMYWJlbGVyIl0sImpvYl9pZCI6Iko0Iiwib3BfY2xhc3MiOiJQUk9DRVNTIiwib3BfaWQiOiJKNC1sYWJlbCIsInNlcSI6Mn0seyJkdXJhdGlvbiI6NDEsImVsaWdpYmxlX21hY2hpbmVzIjpbIk1peGVyLUEiLCJNaXhlci1CIl0sImpvYl9pZCI6Iko1Iiwib3BfY2xhc3MiOiJQUk9DRVNTIiwib3BfaWQiOiJKNS1taXgiLCJzZXEiOjB9LHsiZHVyYXRpb24iOjIzLCJlbGlnaWJsZV9tYWNoaW5lcyI6WyJGaWxsZXItMSIsIkZpbGxlci0yIl0sImpvYl9pZCI6Iko1Iiwib3BfY2xhc3MiOiJQUk9DRVNTIiwib3BfaWQiOiJKNS1maWxsIiwic2VxIjoxfSx7ImR1cmF0aW9uIjoxMzAsImVsaWdpYmxlX21hY2hpbmVzIjpbIkxhYmVsZXIiXSwiam9iX2lkIjoiSjUiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6Iko1LWxhYmVsIiwic2VxIjoyfSx7ImR1cmF0aW9uIjoxOSwiZWxpZ2libGVfbWFjaGluZXMiOlsiTWl4ZXItQSIsIk1peGVyLUIiXSwiam9iX2lkIjoiSjYiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6Iko2LW1peCIsInNlcSI6MH0seyJkdXJhdGlvbiI6NywiZWxpZ2libGVfbWFjaGluZXMiOlsiRmlsbGVyLTEiLCJGaWxsZXItMiJdLCJqb2JfaWQiOiJKNiIsIm9wX2NsYXNzIjoiUFJPQ0VTUyIsIm9wX2lkIjoiSjYtZmlsbCIsInNlcSI6MX0seyJkdXJhdGlvbiI6NzAsImVsaWdpYmxlX21hY2hpbmVzIjpbIkxhYmVsZXIiXSwiam9iX2lkIjoiSjYiLCJvcF9jbGFzcyI6IlBST0NFU1MiLCJvcF9pZCI6Iko2LWxhYmVsIiwic2VxIjoyfV0sInNldHVwX21hdHJpeCI6eyJBbGxlcmdlbnxTcGljeSI6OTAsIkFsbGVyZ2VufFN0YW5kYXJkIjo5MH19LCJpbnN0YW5jZV9yZWYiOnsiaW5zdGFuY2VfZGlnZXN0IjoiZWIzOWUxMGUyYmIzNWUyNzQ1NjQ4ZDU4NTQxNGUxOTFhZTVmNTQ3YWU1YjVkNzFmZWMxMzY5NGEwMmI4MThjZCJ9LCJrcGlfdnNfaW5jdW1iZW50X0IiOnsibGF0ZV9wcmlvcml0eV9vcmRlcnMiOnsiaW5jdW1iZW50X2IiOjIsIm9wdGltaXplZCI6MH0sInRvdGFsX2NoYW5nZW92ZXJfdGltZSI6eyJpbmN1bWJlbnRfYiI6OTAsIm9wdGltaXplZCI6OTB9LCJ3ZWlnaHRlZF90YXJkaW5lc3MiOnsiaW5jdW1iZW50X2IiOjE2OTgsIm9wdGltaXplZCI6MH19LCJwbGFuIjp7ImFzc2lnbm1lbnRzIjp7IkoxLWZpbGwiOlsxMDAsIkZpbGxlci0xIl0sIkoxLWxhYmVsIjpbMjQ5LCJMYWJlbGVyIl0sIkoxLW1peCI6WzE5LCJNaXhlci1CIl0sIkoyLWZpbGwiOls2NiwiRmlsbGVyLTEiXSwiSjItbGFiZWwiOls3OSwiTGFiZWxlciJdLCJKMi1taXgiOlszNywiTWl4ZXItQSJdLCJKMy1maWxsIjpbMzcsIkZpbGxlci0xIl0sIkozLWxhYmVsIjpbNTI5LCJMYWJlbGVyIl0sIkozLW1peCI6WzAsIk1peGVyLUEiXSwiSjQtZmlsbCI6Wzg5LCJGaWxsZXItMSJdLCJKNC1sYWJlbCI6WzQ0OSwiTGFiZWxlciJdLCJKNC1taXgiOls2NiwiTWl4ZXItQSJdLCJKNS1maWxsIjpbMTMwLCJGaWxsZXItMSJdLCJKNS1sYWJlbCI6WzYxOSwiTGFiZWxlciJdLCJKNS1taXgiOls4OSwiTWl4ZXItQSJdLCJKNi1maWxsIjpbMTksIkZpbGxlci0xIl0sIko2LWxhYmVsIjpbMTc5LCJMYWJlbGVyIl0sIko2LW1peCI6WzAsIk1peGVyLUIiXX0sImNsZWFub3V0cyI6W1siTGFiZWxlciIsMzU5LDQ0OSwiY2xlYW5vdXQgSjEtbGFiZWwtPko0LWxhYmVsIl1dfSwicGxhbl9jZXJ0X2lkIjoicGxhbi1jZXJ0LTAwMDEiLCJydWxlX3BhY2tfcmVmIjp7InJ1bGVfcGFja19jZXJ0X3NpZ25hdHVyZV9yZWYiOm51bGwsInJ1bGVfcGFja19kaWdlc3QiOiIzNmY5ZGU5MjhmNzBiMmFmMjVmYTQyYWFkNjFhNGFhYTFhNTJjMWNkNGU2ZWYyN2FhZDM2OGM5NGM5MTAwMmZjIiwicnVsZV9wYWNrX2lkIjoicnVsZS1wYWNrLWdvbGRlbiJ9LCJydWxlcyI6W3siY2xhdXNlX2tpbmQiOiJPQkxJR0FUSU9OIiwiY29tcGlsZV9tb2RlIjoiUExBTl9DT05TVFJBSU5UIiwiZXhjZXB0aW9uX21vZGUiOiJOT05FIiwia2luZCI6InJvdXRpbmdfcHJlY2VkZW5jZSIsIm92ZXJyaWRlcyI6W10sInBhcmFtcyI6e30sInByb3ZlbmFuY2UiOnsic3BhbnMiOlt7ImNoYXJfZW5kIjotMSwiY2hhcl9zdGFydCI6LTEsImhlYWRpbmdfcGF0aCI6IiIsImtpbmQiOiJ0ZXh0IiwicXVvdGVkX3RleHQiOiJNaXggLT4gRmlsbCAtPiBMYWJlbCByb3V0aW5nIChzdHJ1Y3R1cmFsKSIsInJvbGUiOiJtb2RlbGluZ19kZWNpc2lvbiIsInNvdXJjZV9zaGEyNTYiOiIifV19LCJyZXNvbHV0aW9uX2NsYXNzIjoiRUZGSUNJRU5DWSIsInJ1bGVfaWQiOiJSLVJPVVRJTkciLCJzZXZlcml0eSI6IkhBUkQiLCJ0cnVzdF90aWVyIjoiVDQifSx7ImNsYXVzZV9raW5kIjoiUFJPSElCSVRJT04iLCJjb21waWxlX21vZGUiOiJQTEFOX0NPTlNUUkFJTlQiLCJleGNlcHRpb25fbW9kZSI6Ik5PTkUiLCJraW5kIjoibm9fb3ZlcmxhcCIsIm92ZXJyaWRlcyI6W10sInBhcmFtcyI6e30sInByb3ZlbmFuY2UiOnsic3BhbnMiOlt7ImNoYXJfZW5kIjotMSwiY2hhcl9zdGFydCI6LTEsImhlYWRpbmdfcGF0aCI6IiIsImtpbmQiOiJ0ZXh0IiwicXVvdGVkX3RleHQiOiJQZXItbWFjaGluZSBuby1vdmVybGFwIChzdHJ1Y3R1cmFsKSIsInJvbGUiOiJtb2RlbGluZ19kZWNpc2lvbiIsInNvdXJjZV9zaGEyNTYiOiIifV19LCJyZXNvbHV0aW9uX2NsYXNzIjoiRUZGSUNJRU5DWSIsInJ1bGVfaWQiOiJSLU5PT1ZFUkxBUCIsInNldmVyaXR5IjoiSEFSRCIsInRydXN0X3RpZXIiOiJUNCJ9LHsiY2xhdXNlX2tpbmQiOiJPQkxJR0FUSU9OIiwiY29tcGlsZV9tb2RlIjoiUExBTl9DT05TVFJBSU5UIiwiZXhjZXB0aW9uX21vZGUiOiJOT05FIiwia2luZCI6InNldHVwX2NsZWFub3V0Iiwib3ZlcnJpZGVzIjpbXSwicGFyYW1zIjp7ImNsZWFub3V0X21pbnV0ZXMiOjkwLCJ0cmlnZ2VyX2ZhbWlseSI6IkFsbGVyZ2VuIn0sInByb3ZlbmFuY2UiOnsic3BhbnMiOlt7ImNoYXJfZW5kIjo2MDcsImNoYXJfc3RhcnQiOjUzMCwiaGVhZGluZ19wYXRoIjoiIiwia2luZCI6InRleHQiLCJxdW90ZWRfdGV4dCI6ImEgZnVsbCA5MC1taW51dGUgc2FuaXRhdGlvbiBjbGVhbm91dCBpcyByZXF1aXJlZCBiZWZvcmUgdGhlIG5leHQgcHJvZHVjdCBydW5zIiwicm9sZSI6InByaW1hcnlfbm9ybWF0aXZlIiwic291cmNlX3NoYTI1NiI6ImQ5MTY3M2UxMTkzYjMzZDQ5YWQ5NjJhODY3OGQ2MTI5MGU2MmFhYmMwNjJjMTkxZGU3MjA3NGFlNDEwZjUwNjUifV19LCJyZXNvbHV0aW9uX2NsYXNzIjoiU0FGRVRZX1NBTklUQVRJT04iLCJydWxlX2lkIjoiUi1TRVRVUCIsInNldmVyaXR5IjoiSEFSRCIsInRydXN0X3RpZXIiOiJUNCJ9LHsiY2xhdXNlX2tpbmQiOiJQUk9ISUJJVElPTiIsImNvbXBpbGVfbW9kZSI6IlBMQU5fQ09OU1RSQUlOVCIsImV4Y2VwdGlvbl9tb2RlIjoiTk9ORSIsImtpbmQiOiJtYWludGVuYW5jZSIsIm92ZXJyaWRlcyI6W10sInBhcmFtcyI6e30sInByb3ZlbmFuY2UiOnsic3BhbnMiOlt7ImNoYXJfZW5kIjoyMzEsImNoYXJfc3RhcnQiOjE1NiwiaGVhZGluZ19wYXRoIjoiIiwia2luZCI6InRleHQiLCJxdW90ZWRfdGV4dCI6IkZpbGxlci0yIGlzIHVuYXZhaWxhYmxlIGZvciBzY2hlZHVsZWQgbWFpbnRlbmFuY2UgZXZlcnkgVHVlc2RheSAwMjowMC0wNjowMCIsInJvbGUiOiJwcmltYXJ5X25vcm1hdGl2ZSIsInNvdXJjZV9zaGEyNTYiOiJkOTE2NzNlMTE5M2IzM2Q0OWFkOTYyYTg2NzhkNjEyOTBlNjJhYWJjMDYyYzE5MWRlNzIwNzRhZTQxMGY1MDY1In1dfSwicmVzb2x1dGlvbl9jbGFzcyI6IkhBUkRfQVZBSUxBQklMSVRZX01BSU5URU5BTkNFIiwicnVsZV9pZCI6IlItTUFJTlQiLCJzZXZlcml0eSI6IkhBUkQiLCJ0cnVzdF90aWVyIjoiVDQifSx7ImNsYXVzZV9raW5kIjoiT0JMSUdBVElPTiIsImNvbXBpbGVfbW9kZSI6IlBMQU5fQ09OU1RSQUlOVCIsImV4Y2VwdGlvbl9tb2RlIjoiTk9ORSIsImtpbmQiOiJzaGlmdCIsIm92ZXJyaWRlcyI6W10sInBhcmFtcyI6eyJkYXlfZW5kIjo5NjAsImRheV9zdGFydCI6MCwibmlnaHRfZW5kIjoxNDQwLCJuaWdodF9zdGFydCI6OTYwfSwicHJvdmVuYW5jZSI6eyJzcGFucyI6W3siY2hhcl9lbmQiOjEzNCwiY2hhcl9zdGFydCI6NzAsImhlYWRpbmdfcGF0aCI6IiIsImtpbmQiOiJ0ZXh0IiwicXVvdGVkX3RleHQiOiJUaGUgcGxhbnQgcnVucyB0d28gc2hpZnRzOiBkYXkgMDY6MDAtMjI6MDAgYW5kIG5pZ2h0IDIyOjAwLTA2OjAwIiwicm9sZSI6InByaW1hcnlfbm9ybWF0aXZlIiwic291cmNlX3NoYTI1NiI6ImQ5MTY3M2UxMTkzYjMzZDQ5YWQ5NjJhODY3OGQ2MTI5MGU2MmFhYmMwNjJjMTkxZGU3MjA3NGFlNDEwZjUwNjUifV19LCJyZXNvbHV0aW9uX2NsYXNzIjoiRUZGSUNJRU5DWSIsInJ1bGVfaWQiOiJSLVNISUZUIiwic2V2ZXJpdHkiOiJIQVJEIiwidHJ1c3RfdGllciI6IlQ0In0seyJjbGF1c2Vfa2luZCI6IlBST0hJQklUSU9OIiwiY29tcGlsZV9tb2RlIjoiUExBTl9DT05TVFJBSU5UIiwiZXhjZXB0aW9uX21vZGUiOiJOT05FIiwia2luZCI6Im5pZ2h0X2NsZWFub3V0Iiwib3ZlcnJpZGVzIjpbXSwicGFyYW1zIjp7ImRheV9lbmQiOjk2MCwiZGF5X3N0YXJ0IjowLCJuaWdodF9lbmQiOjE0NDAsIm5pZ2h0X3N0YXJ0Ijo5NjB9LCJwcm92ZW5hbmNlIjp7InNwYW5zIjpbeyJjaGFyX2VuZCI6NzI2LCJjaGFyX3N0YXJ0Ijo2MzIsImhlYWRpbmdfcGF0aCI6IiIsImtpbmQiOiJ0ZXh0IiwicXVvdGVkX3RleHQiOiJDbGVhbm91dHMgbWF5IG9ubHkgYmUgcGVyZm9ybWVkIGR1cmluZyB0aGUgZGF5IHNoaWZ0OyB0aGUgc2FuaXRhdGlvbiBjcmV3IGRvZXMgbm90IHdvcmsgbmlnaHRzIiwicm9sZSI6InByaW1hcnlfbm9ybWF0aXZlIiwic291cmNlX3NoYTI1NiI6ImQ5MTY3M2UxMTkzYjMzZDQ5YWQ5NjJhODY3OGQ2MTI5MGU2MmFhYmMwNjJjMTkxZGU3MjA3NGFlNDEwZjUwNjUifV19LCJyZXNvbHV0aW9uX2NsYXNzIjoiU0FGRVRZX1NBTklUQVRJT04iLCJydWxlX2lkIjoiUi02LjEtTklHSFQtQ0xFQU5PVVQiLCJzZXZlcml0eSI6IkhBUkQiLCJ0cnVzdF90aWVyIjoiVDQifV0sInNjaGVtYV92ZXJzaW9uIjoiZmVhc2libGUucGxhbl9jZXJ0LnYxIiwidHJ1c3RfYm91bmRhcnkiOnsib3B0aW1hbGl0eSI6IkNQLVNBVCBzZWxmLXJlcG9ydGVkIGdhcCArIGEgU0FNRS1FTkdJTkUgdHJpcHdpcmU7IG5vdCBpbmRlcGVuZGVudGx5IHByb3ZlbiAoTWluaVppbmMtPkNodWZmZWQgaXMgdGhlIHYxLjEgdXBncmFkZSkuIiwic2VtYW50aWNfY29ycmVsYXRpb25fcmVzaWR1YWwiOiJhIG1pc3JlYWRpbmcgc2hhcmVkIGJ5IGV4dHJhY3Rpb24gKyByZXZpZXdlciArIGNoZWNrZXIgaXMgbm90IGNhdWdodCBieSB2MS4iLCJzaGFyZWRfY29udmVudGlvbiI6ImNvbXBpbGVyIGFuZCBjaGVja2VyIHNoYXJlIG9ubHkgdGhlIGNhbm9uaWNhbCAoc3RhcnQsIHN0YWJsZV9vcF9pZCkgb3JkZXIuIiwidmVyaWZpY2F0aW9uIjoiSVItcmVsYXRpdmU6IHRoZSBwbGFuIHNhdGlzZmllcyB0aGUgYXBwcm92ZWQgSVI7IHRoZSBzb3VyY2UtPklSIGVkZ2UgaXMgY2xvc2VkIGJ5IHRoZSBleHRyYWN0aW9uLWluZGVwZW5kZW5jZSBsYXllciArIGh1bWFuIGdhdGUgKEJ1aWxkIEIpLiJ9fQ==",
+    "payloadType": "application/vnd.feasible.cert+json",
+    "signatures": [
+      {
+        "keyid": "",
+        "sig": "I+5K04ynK9Iocd4/aeMEWunfJSBbwzPiWmN3ZsvoH4QeEe5ZfBE2FvWcZ5PkV8JAiuFHPmXSWPikQs5lezOGAg=="
+      }
+    ],
+    "public_key_hex": "94f70c3e9cc6bb92d79869776fda0aa6b9c8f3cd264cac460606575f964c7911"
+  }
+}</pre>
+</body></html>
