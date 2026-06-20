@@ -15,13 +15,16 @@ from feasible.ir.domain import (
     Severity,
     TextSpan,
 )
-from feasible.scenario import SHOP_RULES, build_scenario_ir
+from feasible.govern.pipeline import govern_pack
+from feasible.scenario import SHOP_RULES, build_extracted_pack, build_scenario_ir
 
 
 def _emit():
-    ir = build_scenario_ir()
+    # the Rule-Pack Cert certifies the approved UNIVERSE (golden 6 + anchored R-4.4 + corrected R-5.2)
+    gov = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY)
+    ir = gov.universe_ir
     key = new_signing_key()
-    cert = emit_rulepack_cert(ir, SHOP_RULES, MANUFACTURING_POLICY, [], key)
+    cert = emit_rulepack_cert(ir, SHOP_RULES, MANUFACTURING_POLICY, gov.resolutions, key)
     return ir, cert, key
 
 

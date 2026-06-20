@@ -46,15 +46,17 @@ def weighted_tardiness(ir: FCIR, plan: Plan) -> int:
 
 
 def late_priority_orders(ir: FCIR, plan: Plan) -> int:
+    # priority-1 orders only (matches the certificate's "late priority orders" label)
     return sum(
-        1 for job in ir.instance.jobs if _completion(ir, plan, job.id) > job.due_date
+        1 for job in ir.instance.jobs
+        if job.priority == 1 and _completion(ir, plan, job.id) > job.due_date
     )
 
 
 def total_changeover_time(ir: FCIR, plan: Plan) -> int:
     total = 0
     for mc in ir.instance.machines:
-        seq = machine_sequence(plan, mc)
+        seq = machine_sequence(plan, mc, ir)  # total: skip ghost ops
         for i_id, j_id in zip(seq, seq[1:]):
             total += ir.instance.setup(_family(ir, i_id), _family(ir, j_id))
     return total

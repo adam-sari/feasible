@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Tests
+        run: python -m pytest -q
+      - name: Types
+        run: python -m mypy feasible
+      - name: CLI smoke — certify + bundled verify (the demo must stay honest)
+        run: |
+          python -m feasible.cli certify feasible/scenario/data --out plan_cert.json --rulepack-out rule_pack_cert.json
+          python -m feasible.cli verify plan_cert.json --rulepack rule_pack_cert.json

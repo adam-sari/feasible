@@ -24,9 +24,11 @@ class ScopeCorrection(BaseModel):
 
 
 class GovernResult(BaseModel):
-    active_ir: FCIR
+    universe_ir: FCIR  # corrected (post-§5.2), R-4.4 RETAINED — the full approved universe
+    active_ir: FCIR    # universe minus AUTO_BY_POLICY drops (R-4.4 removed)
     resolutions: list[Resolution] = Field(default_factory=list)
     corrections: list[ScopeCorrection] = Field(default_factory=list)
+    dropped_rule_ids: list[str] = Field(default_factory=list)
 
 
 def govern_pack(extracted: FCIR, policy: ConflictPolicy) -> GovernResult:
@@ -47,5 +49,15 @@ def govern_pack(extracted: FCIR, policy: ConflictPolicy) -> GovernResult:
     conflicts = detect_normative_conflicts(corrected)
     resolutions = resolve_conflicts(corrected, conflicts, policy)
     active_ir = active_after_resolution(corrected, resolutions)
+    dropped_rule_ids = [
+        r.dropped_rule_id for r in resolutions
+        if r.resolution_mode == "AUTO_BY_POLICY" and r.dropped_rule_id is not None
+    ]
 
-    return GovernResult(active_ir=active_ir, resolutions=resolutions, corrections=corrections)
+    return GovernResult(
+        universe_ir=corrected,
+        active_ir=active_ir,
+        resolutions=resolutions,
+        corrections=corrections,
+        dropped_rule_ids=dropped_rule_ids,
+    )

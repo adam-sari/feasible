@@ -19,8 +19,8 @@ messy inputs ─▶ formalized rules ─▶ governance ─▶ candidate plan ─
 
 ```
 $ feasible certify feasible/scenario/data
-extraction: 8 candidate rules -> 7 active after governance
-coverage ledger: complete=True denominator=6 red=0
+extraction: 8 candidate rules -> 8 approved universe -> 7 active after policy
+coverage ledger: complete=True denominator=8 red=0
 §5.2 back-translation correction [R-5.2]: 'whole-line lock' -> 'fill operation only'
 §4.4 conflict [R-SETUP vs R-4.4]: AUTO_BY_POLICY -> SAFETY_SANITATION(100) > CUSTOMER_PRIORITY(50)
 plan: status=OPTIMAL objective(wt,co)=(0, 90) checker=PASS
@@ -47,8 +47,12 @@ clause, and emits two signed certificates that re-verify offline.
   conflict class, severity, trust tier, and source spans.
 - **Polynomial checker** (`feasible/checker`) — the *authoritative* verifier: a
   total, code-disjoint, closed-predicate evaluator (in P). It is the engine that
-  catches the gotcha. **Z3** (`feasible/smt`) independently corroborates and
-  emits UNSAT cores; a **same-engine CP-SAT tripwire** corroborates optimality.
+  catches the gotcha. A **fail-closed rule registry** guarantees every active hard
+  rule is *evaluated-or-structurally-guaranteed* (nothing is silently inert;
+  structural rules like `non_preemption` are reported separately from
+  predicate-checked ones), and a **plan-shape** layer rejects malformed plans.
+  **Z3** (`feasible/smt`) independently corroborates and emits UNSAT cores; a
+  **same-engine CP-SAT tripwire** corroborates optimality.
 - **CP-SAT compiler** (`feasible/compile`) — optional intervals + per-machine
   `AddCircuit` with the full self-loop biconditional, sequence-dependent setups,
   materialized day-shift cleanouts, maintenance blocks, staged lexicographic
@@ -73,9 +77,9 @@ py -3.11 -m venv .venv
 
 python -m feasible.cli certify feasible/scenario/data   # the full loop
 python -m feasible.cli run     feasible/scenario/data   # Build-A spine only
-python -m feasible.cli verify  plan_cert.json           # offline re-check
+python -m feasible.cli verify  plan_cert.json --rulepack rule_pack_cert.json  # offline re-check + binding
 
-python -m pytest -q     # 119 tests
+python -m pytest -q     # 168 tests
 python -m mypy feasible # clean
 ```
 
@@ -88,7 +92,14 @@ python -m mypy feasible # clean
 - Coverage completeness is **relative** to the deterministic span enumeration +
   classifier, not absolute.
 - The LLM never touches a plan certificate's truth claims; extraction is
-  non-gating (the recorded §5.2 transcript is honest about being recorded).
+  non-gating (the recorded §5.2 transcript is honest about being recorded). Every
+  rule is **source-grounded** — §4.4 and §5.2 are real clauses in the SOP, anchored
+  to char spans a skeptic can find.
+
+The Rule-Pack Cert certifies the full approved **universe** (incl. the policy-dropped
+permission); the Plan Cert records what was **dropped by policy** and binds to the
+universe digest. `verify --rulepack` re-checks both and the binding offline; the
+Rule-Pack Cert's conflict resolution is **deterministically replayed** (no solver).
 
 ## Provenance
 

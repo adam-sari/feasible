@@ -17,7 +17,9 @@ import z3
 from pydantic import BaseModel, Field
 
 from feasible.checker.checker import DAY_DEFAULT, machine_sequence
+from feasible.checker.plan_shape import validate_plan_shape
 from feasible.ir.domain import FCIR, Plan
+from feasible.registry import unsupported_hard_rules
 
 
 class AttestResult(BaseModel):
@@ -33,6 +35,14 @@ def _family(ir: FCIR, op_id: str) -> str:
 
 def attest_feasibility(plan: Plan, ir: FCIR) -> AttestResult:
     inst = ir.instance
+
+    # Mirror the checker's structural + fail-closed registry gate so the pair agrees
+    # on malformed / unsupported plans (and so the Z3 encoding never sees a ghost op).
+    gate = [f"R-PLAN-SHAPE:{v.counter_witness['predicate']}" for v in validate_plan_shape(plan, ir)]
+    gate += [f"R-UNSUPPORTED-RULE:{r.rule_id}" for r in unsupported_hard_rules(ir)]
+    if gate:
+        return AttestResult(feasible=False, unsat_core=gate, minimization_status="not_minimized")
+
     s = z3.Solver()
     s.set(unsat_core=True)
 
@@ -83,7 +93,7 @@ def attest_feasibility(plan: Plan, ir: FCIR) -> AttestResult:
     # R-SETUP: a sufficient cleanout exists between each allergen->non-allergen pair
     if ir.has_active("R-SETUP"):
         for mc in inst.machines:
-            seq = machine_sequence(plan, mc)
+            seq = machine_sequence(plan, mc, ir)
             for i_id, j_id in zip(seq, seq[1:]):
                 req = inst.setup(_family(ir, i_id), _family(ir, j_id))
                 if req <= 0:

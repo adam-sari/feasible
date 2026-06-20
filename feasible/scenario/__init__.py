@@ -69,6 +69,18 @@ def _rule(rule_id, kind, clause, resclass, quoted, params=None, role="primary_no
     )
 
 
+def _anchor_rules(rules: list[Rule], sop_text: str) -> None:
+    """Anchor every primary_normative span against the SOP (validates the quote
+    exists and pins its char range). Shared by the golden + extracted builders."""
+    digest = sha256_text(sop_text)
+    for r in rules:
+        for s in r.provenance.spans:
+            if isinstance(s, TextSpan) and s.role == "primary_normative":
+                pos = anchor(s.quoted_text, sop_text)
+                assert pos is not None, f"{r.rule_id}: quote not in SOP: {s.quoted_text!r}"
+                s.char_start, s.char_end, s.source_sha256 = pos[0], pos[1], digest
+
+
 def build_scenario_ir() -> FCIR:
     jobs = [Job(id=j, product=p, family=f, qty=100, due_date=d, priority=pr) for (j, p, f, pr, d) in JOBS]
     operations: list[Operation] = []
@@ -99,14 +111,7 @@ def build_scenario_ir() -> FCIR:
               "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
               {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440}),
     ]
-    # anchor spans against the SOP (validates the primary_normative quotes exist)
-    digest = sha256_text(SHOP_RULES)
-    for r in rules:
-        for s in r.provenance.spans:
-            if isinstance(s, TextSpan) and s.role == "primary_normative":
-                pos = anchor(s.quoted_text, SHOP_RULES)
-                assert pos is not None, f"{r.rule_id}: quote not in SOP: {s.quoted_text!r}"
-                s.char_start, s.char_end, s.source_sha256 = pos[0], pos[1], digest
+    _anchor_rules(rules, SHOP_RULES)  # validates the primary_normative quotes exist
     return FCIR(rules=rules, instance=inst)
 
 
@@ -138,9 +143,12 @@ def make_mis_extraction_r52() -> Rule:
 
 def build_extracted_pack() -> FCIR:
     """The 'messy extraction' candidate rule pack: golden rules + the seeded
-    §4.4 permission and the §5.2 wrong-scope mis-extraction."""
+    §4.4 permission and the §5.2 wrong-scope mis-extraction. The extracted rules
+    are anchored against the SOP too, so §4.4/§5.2 are source-grounded."""
     base = build_scenario_ir()
-    return FCIR(rules=[*base.rules, make_permission_r44(), make_mis_extraction_r52()], instance=base.instance)
+    extracted = [make_permission_r44(), make_mis_extraction_r52()]
+    _anchor_rules(extracted, SHOP_RULES)
+    return FCIR(rules=[*base.rules, *extracted], instance=base.instance)
 
 
 def generate_incumbent_b(ir: FCIR, max_seconds: float = 30.0):
@@ -160,8 +168,9 @@ def generate_incumbent_b(ir: FCIR, max_seconds: float = 30.0):
     return extract_plan(solver, vi)
 
 
-def make_incumbent_a(incumbent_b, machine: str = "Labeler"):
-    """The planner's baseline with a manually-placed 23:30 (illegal) cleanout."""
+def make_incumbent_a(incumbent_b, machine: str = "Filler-1"):
+    """The planner's baseline with a manually-placed 23:30 (illegal) allergen
+    cleanout on a filler line (where sanitation actually happens)."""
     from feasible.ir.domain import Plan
 
     cleanouts = list(incumbent_b.cleanouts) + [(machine, 1050, 1140, "manual cleanout J1->J2 (23:30)")]

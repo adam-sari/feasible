@@ -157,12 +157,17 @@ def sign_dsse(payload: dict, private_key: Ed25519PrivateKey) -> dict:
 
 def verify_dsse(envelope: dict, public_key: Ed25519PublicKey) -> bool:
     try:
+        if envelope.get("payloadType") != PAYLOAD_TYPE:  # pin to the canonical type
+            return False
+        sigs = envelope.get("signatures")
+        if not isinstance(sigs, list) or len(sigs) == 0:  # empty / non-list -> fail closed
+            return False
         body = base64.b64decode(envelope["payload"])
-        pae = _pae(envelope["payloadType"], body)
-        for s in envelope["signatures"]:
+        pae = _pae(PAYLOAD_TYPE, body)
+        for s in sigs:
             public_key.verify(base64.b64decode(s["sig"]), pae)
         return True
-    except (InvalidSignature, KeyError, ValueError):
+    except (InvalidSignature, KeyError, ValueError, TypeError):
         return False
 
 

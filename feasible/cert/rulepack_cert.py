@@ -22,7 +22,7 @@ from feasible.govern.backtranslate import back_translate, polarity_matches_sourc
 from feasible.govern.conflict import Resolution
 from feasible.govern.coverage import build_coverage_ledger
 from feasible.govern.ledger import build_trust_ledger, ledger_merkle_root
-from feasible.ir.domain import FCIR, Rule
+from feasible.ir.domain import ExceptionMode, FCIR, Rule
 
 SCHEMA_VERSION = "feasible.rule_pack_cert.v1"
 
@@ -71,6 +71,7 @@ def emit_rulepack_cert(
             ],
         },
         "conflict_policy_ref": {"policy_id": policy.policy_id, "digest": policy.digest()},
+        "conflict_policy": policy.model_dump(mode="json"),  # embedded for deterministic replay
         "trust_ledger_merkle_root": ledger_merkle_root(events),
         "rule_pack_digest": rule_pack_digest(ir),
         "trust_boundary": {
@@ -123,6 +124,37 @@ def verify_rulepack_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResu
         reasons.append("coverage denominator mismatch")
     if sha256_text(cert["sop_text"]) != cert["sources"][0]["sha256"]:
         reasons.append("SOP digest mismatch")
+
+    # replay the conflict policy deterministically (no Z3 re-run)
+    try:
+        policy = ConflictPolicy.model_validate(cert["conflict_policy"])
+    except Exception as e:  # noqa: BLE001
+        reasons.append(f"policy reconstruction failed: {e}")
+        return VerifyResult(ok=False, reasons=reasons)
+    if policy.digest() != cert["conflict_policy_ref"]["digest"]:
+        reasons.append("conflict_policy digest mismatch")
+    by_id = {r.rule_id: r for r in ir.rules}
+    for res in cert["conflict_status"]["resolutions"]:
+        obl, perm, mode = by_id.get(res["obligation"]), by_id.get(res["permission"]), res["resolution_mode"]
+        if obl is None or perm is None:
+            reasons.append(f"resolution references missing rule(s): {res['obligation']}/{res['permission']}")
+            continue
+        po, pp = policy.priority(obl.resolution_class or ""), policy.priority(perm.resolution_class or "")
+        has_exc = obl.exception_mode != ExceptionMode.NONE or perm.exception_mode != ExceptionMode.NONE
+        if mode == "AUTO_BY_POLICY":
+            if po is None or pp is None:
+                reasons.append(f"AUTO resolution {res['obligation']}/{res['permission']} cites an undeclared class")
+            elif po == pp:
+                reasons.append(f"AUTO resolution between equal-priority classes ({obl.resolution_class})")
+            elif has_exc:
+                reasons.append("AUTO resolution despite an exception/override marker")
+            else:
+                lower = obl.rule_id if po < pp else perm.rule_id
+                if res["dropped"] != lower:
+                    reasons.append(f"AUTO dropped {res['dropped']} != lower-priority {lower}")
+        elif mode == "ESCALATE":
+            if po is not None and pp is not None and po != pp and not has_exc:
+                reasons.append("ESCALATE that should have auto-resolved (unequal priorities, no exception)")
 
     return VerifyResult(ok=len(reasons) == 0, reasons=reasons)
 

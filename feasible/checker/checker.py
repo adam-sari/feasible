@@ -12,23 +12,14 @@ re-runs this exact code.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
+from feasible.checker.plan_shape import validate_plan_shape
+from feasible.checker.result import CheckResult, Violation
 from feasible.ir.domain import CellRef, FCIR, OpClass, Plan, TextSpan
+from feasible.registry import unsupported_hard_rules
 
 DAY_DEFAULT = {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440}
 
-
-class Violation(BaseModel):
-    rule_id: str
-    span: TextSpan | CellRef | None = None
-    message: str
-    counter_witness: dict = Field(default_factory=dict)
-
-
-class CheckResult(BaseModel):
-    passed: bool
-    violations: list[Violation] = Field(default_factory=list)
+__all__ = ["Violation", "CheckResult", "check", "machine_sequence", "rule_span", "DAY_DEFAULT"]
 
 
 def rule_span(ir: FCIR, rule_id: str) -> TextSpan | CellRef | None:
@@ -41,9 +32,15 @@ def rule_span(ir: FCIR, rule_id: str) -> TextSpan | CellRef | None:
     return r.provenance.spans[0] if r.provenance.spans else None
 
 
-def machine_sequence(plan: Plan, machine: str) -> list[str]:
-    """Op ids on ``machine`` in canonical (start, stable_op_id) order."""
+def machine_sequence(plan: Plan, machine: str, ir: FCIR | None = None) -> list[str]:
+    """Op ids on ``machine`` in canonical (start, stable_op_id) order.
+
+    When ``ir`` is given, op ids not in ``ir.instance.operations`` are skipped
+    (predicate totality: a malformed plan with a ghost op must not raise)."""
     ops = [op for op, (_, mc) in plan.assignments.items() if mc == machine]
+    if ir is not None:
+        known = {o.op_id for o in ir.instance.operations}
+        ops = [o for o in ops if o in known]
     return sorted(ops, key=lambda o: (plan.start(o), o))
 
 
@@ -62,7 +59,15 @@ def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
 
 
 def check(plan: Plan, ir: FCIR) -> CheckResult:
-    violations: list[Violation] = []
+    # Structural well-formedness + the fail-closed registry run ALONGSIDE the rule
+    # predicates (no early-return) so a malformed plan is reported AND R-6.1 still
+    # fires. The rule predicates are total (machine_sequence skips ghost ops).
+    violations: list[Violation] = list(validate_plan_shape(plan, ir))
+    for r in unsupported_hard_rules(ir):
+        violations.append(Violation(
+            rule_id="R-UNSUPPORTED-RULE", span=None,
+            message=f"active hard rule {r.rule_id} (kind {r.kind}) has no evaluator",
+            counter_witness={"rule_id": r.rule_id, "kind": r.kind}))
     inst = ir.instance
 
     # R-ROUTING: ops of a job run in seq order (next starts at/after prev ends)
@@ -108,7 +113,7 @@ def check(plan: Plan, ir: FCIR) -> CheckResult:
     # R-SETUP: every Allergen->non-allergen adjacency has a sufficient cleanout
     if ir.has_active("R-SETUP"):
         for mc in inst.machines:
-            seq = machine_sequence(plan, mc)
+            seq = machine_sequence(plan, mc, ir)
             for i_id, j_id in zip(seq, seq[1:]):
                 required = inst.setup(_family(ir, i_id), _family(ir, j_id))
                 if required <= 0:

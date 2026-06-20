@@ -18,18 +18,29 @@ from feasible.ir.domain import (
     Severity,
     TextSpan,
 )
-from feasible.scenario import SHOP_RULES, build_scenario_ir
+from feasible.conflict.policy import MANUFACTURING_POLICY
+from feasible.govern.pipeline import govern_pack
+from feasible.scenario import SHOP_RULES, build_extracted_pack, build_scenario_ir
 
 
-def test_coverage_complete_on_scenario() -> None:
-    ir = build_scenario_ir()
-    ledger = build_coverage_ledger(SHOP_RULES, ir)
+def test_coverage_complete_on_universe() -> None:
+    # completeness is over the approved UNIVERSE (golden 6 + R-4.4 + corrected R-5.2)
+    gov = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY)
+    ledger = build_coverage_ledger(SHOP_RULES, gov.universe_ir)
     assert ledger.complete is True
     assert ledger.red_findings == []
-    assert ledger.denominator > 0
-    # the night clause is covered by R-6.1
+    assert ledger.denominator == 8
     night = [e for e in ledger.entries if "does not work nights" in e.text]
     assert night and "R-6.1-NIGHT-CLEANOUT" in night[0].covered_by
+    cont = [e for e in ledger.entries if "run it to completion" in e.text]
+    assert cont and "R-5.2" in cont[0].covered_by
+
+
+def test_golden_six_leaves_allergen_continuity_red() -> None:
+    # the golden spine ALONE does not cover §5.2 — extraction (R-5.2) is required to fill it
+    ledger = build_coverage_ledger(SHOP_RULES, build_scenario_ir())
+    assert ledger.complete is False
+    assert any("run it to completion" in e.text for e in ledger.red_findings)
 
 
 def test_coverage_red_when_rule_dropped() -> None:

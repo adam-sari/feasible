@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from ortools.sat.python import cp_model
 
 from feasible.ir.domain import FCIR
+from feasible.registry import assert_all_hard_rules_supported
 
 DEPOT = 0
 DAY_DEFAULT = {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440}
@@ -44,6 +45,7 @@ def _family_of(ir: FCIR, op_id: str) -> str:
 
 
 def build_model(ir: FCIR) -> tuple[cp_model.CpModel, VarIndex]:
+    assert_all_hard_rules_supported(ir)  # fail closed: never optimize against an unevaluated hard rule
     m = cp_model.CpModel()
     inst = ir.instance
     H = inst.horizon

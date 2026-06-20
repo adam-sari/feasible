@@ -23,6 +23,7 @@ from feasible.canon.canonical import (
 )
 from feasible.checker.checker import CheckResult, check
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
+from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
 from feasible.solve.orchestrate import (
     SolveResult,
@@ -58,8 +59,20 @@ def active_rule_ids(ir: FCIR) -> list[str]:
     return sorted(r.rule_id for r in ir.hard_plan_rules())
 
 
-def active_rule_set_digest(ir: FCIR, dropped: list[str]) -> str:
-    return digest_of({"active": active_rule_ids(ir), "dropped": sorted(dropped)})
+def active_rule_set_digest(ir: FCIR, dropped: list) -> str:
+    # hash only rule_ids — the rich `dropped` dicts are render metadata, never hashed
+    ids = sorted(d["rule_id"] if isinstance(d, dict) else d for d in dropped)
+    return digest_of({"active": active_rule_ids(ir), "dropped": ids})
+
+
+def checked_rule_ids(ir: FCIR) -> list[str]:
+    """Active hard rules an explicit predicate evaluates (excludes structural ones)."""
+    return sorted(EVALUATED_RULE_IDS & set(active_rule_ids(ir)))
+
+
+def structurally_enforced_rule_ids(ir: FCIR) -> list[str]:
+    """Active hard rules guaranteed by the model (e.g. non_preemption) — NOT predicate-checked."""
+    return sorted(r.rule_id for r in ir.hard_plan_rules() if r.kind in STRUCTURAL_RULE_KINDS)
 
 
 def _kpi(ir: FCIR, optimized: Plan, incumbent_b: Plan) -> dict:
@@ -102,7 +115,12 @@ def emit_plan_cert(
     incumbent_b: Plan,
     private_key: Ed25519PrivateKey,
     plan_cert_id: str = "plan-cert-0001",
+    dropped: list[dict] | None = None,
+    rule_pack_digest_override: str | None = None,
 ) -> dict:
+    assert_all_hard_rules_supported(ir)  # never certify a plan against an unevaluated hard rule
+    dropped = dropped or []
+    rpd = rule_pack_digest_override or rule_pack_digest(ir)  # universe digest when called from certify
     objective = list(result.objective) if result.objective else [0, 0]
     tripwire_ok = optimality_tripwire(ir, (objective[0], objective[1]))
     gap_bps = 0 if (result.gap == 0.0) else -1  # -1 = not proven optimal
@@ -112,13 +130,13 @@ def emit_plan_cert(
         "plan_cert_id": plan_cert_id,
         "rule_pack_ref": {
             "rule_pack_id": "rule-pack-golden",
-            "rule_pack_digest": rule_pack_digest(ir),
+            "rule_pack_digest": rpd,
             "rule_pack_cert_signature_ref": None,
         },
         "active_rule_set_for_plan": {
             "active_rule_ids": active_rule_ids(ir),
-            "dropped": [],
-            "active_rule_set_digest": active_rule_set_digest(ir, []),
+            "dropped": dropped,
+            "active_rule_set_digest": active_rule_set_digest(ir, dropped),
         },
         "instance_ref": {"instance_digest": digest_of(ir.instance.model_dump(mode="json"))},
         # embedded for a self-contained, solver-free verify:
@@ -127,8 +145,10 @@ def emit_plan_cert(
         "plan": plan.model_dump(mode="json"),
         "claims": {
             "formalization": {
-                "rule_pack_digest_ref": _leaf(rule_pack_digest(ir), "rule_pack_digest_ref"),
+                "rule_pack_digest_ref": _leaf(rpd, "rule_pack_digest_ref"),
                 "n_hard_rules": _leaf(len(active_rule_ids(ir)), "ledger"),
+                "checked_rule_ids": _leaf(checked_rule_ids(ir), "ledger"),
+                "structurally_enforced_rule_ids": _leaf(structurally_enforced_rule_ids(ir), "ledger"),
                 "rules_grounded_in_source": _leaf(
                     sum(
                         1 for r in ir.hard_plan_rules()
@@ -222,11 +242,16 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
     if recomputed != list(claimed):
         reasons.append(f"objective mismatch: recomputed {recomputed} != cert {claimed}")
 
-    # 5) re-derive digests
-    if rule_pack_digest(ir) != cert["rule_pack_ref"]["rule_pack_digest"]:
-        reasons.append("rule_pack_digest mismatch")
+    # 5) self-consistency. rule_pack_ref.rule_pack_digest is an OPAQUE universe token
+    # (tamper-protected by the body-vs-signature binding above; NOT re-derivable from the
+    # embedded ACTIVE rules) — it is confirmed against the Rule-Pack Cert by the bundled
+    # `verify --rulepack`, not re-derived here. The active-rule-set digest IS re-derived,
+    # and the rule_pack_digest_ref leaf must equal the ref binding.
     if active_rule_set_digest(ir, cert["active_rule_set_for_plan"]["dropped"]) != cert["active_rule_set_for_plan"]["active_rule_set_digest"]:
         reasons.append("active_rule_set_digest mismatch")
+    leaf = cert["claims"]["formalization"]["rule_pack_digest_ref"]["value"]
+    if leaf != cert["rule_pack_ref"]["rule_pack_digest"]:
+        reasons.append("rule_pack_digest_ref leaf != rule_pack_ref binding")
 
     return VerifyResult(ok=len(reasons) == 0, reasons=reasons)
 

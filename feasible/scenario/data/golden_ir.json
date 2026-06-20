@@ -68,7 +68,7 @@
         "spans": [
           {
             "kind": "text",
-            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "source_sha256": "c67256ea01a10688cf4bea99d9b3c468c8421b9946a902322ce0a4e98fa80734",
             "char_start": 530,
             "char_end": 607,
             "quoted_text": "a full 90-minute sanitation cleanout is required before the next product runs",
@@ -93,7 +93,7 @@
         "spans": [
           {
             "kind": "text",
-            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "source_sha256": "c67256ea01a10688cf4bea99d9b3c468c8421b9946a902322ce0a4e98fa80734",
             "char_start": 156,
             "char_end": 231,
             "quoted_text": "Filler-2 is unavailable for scheduled maintenance every Tuesday 02:00-06:00",
@@ -123,7 +123,7 @@
         "spans": [
           {
             "kind": "text",
-            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
+            "source_sha256": "c67256ea01a10688cf4bea99d9b3c468c8421b9946a902322ce0a4e98fa80734",
             "char_start": 70,
             "char_end": 134,
             "quoted_text": "The plant runs two shifts: day 06:00-22:00 and night 22:00-06:00",
@@ -153,9 +153,9 @@
         "spans": [
           {
             "kind": "text",
-            "source_sha256": "d91673e1193b33d49ad962a8678d61290e62aabc062c191de72074ae410f5065",
-            "char_start": 632,
-            "char_end": 726,
+            "source_sha256": "c67256ea01a10688cf4bea99d9b3c468c8421b9946a902322ce0a4e98fa80734",
+            "char_start": 897,
+            "char_end": 991,
             "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
             "heading_path": "",
             "role": "primary_normative"
