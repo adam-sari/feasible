@@ -22,7 +22,10 @@ TAXONOMY = [
     "hard_prohibition", "hard_obligation", "conditional_obligation",
     "soft_target", "definition", "boilerplate", "metadata",
 ]
-NORMATIVE_RED = {"hard_prohibition", "hard_obligation"}
+# A conditional obligation (e.g. "when switching off an allergen product, a
+# cleanout is required") is still a HARD requirement when it applies — an
+# uncovered one is a silently-dropped rule and must be RED.
+NORMATIVE_RED = {"hard_prohibition", "hard_obligation", "conditional_obligation"}
 
 
 def classify(seg: Segment) -> str:
@@ -88,7 +91,8 @@ def build_coverage_ledger(sop_text: str, ir: FCIR) -> CoverageLedger:
         if category in NORMATIVE_RED:
             denom += 1
             status = "COVERED" if covered_by else "RED"
-        elif category in ("conditional_obligation", "soft_target"):
+        elif category == "soft_target":
+            # soft targets (e.g. §3.1/§3.4, reclassified soft) need no rule
             denom += 1
             status = "COVERED" if covered_by else "NON_NORMATIVE"
         else:
