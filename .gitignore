@@ -8,3 +8,7 @@ build/
 dist/
 plan_cert.json
 plan_cert.html
+/*_cert.json
+/*_cert.html
+/demo_*
+/final_*
