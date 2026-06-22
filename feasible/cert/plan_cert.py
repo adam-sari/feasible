@@ -30,6 +30,7 @@ from feasible.canon.canonical import (
 )
 from feasible.checker.checker import CheckResult, check
 from feasible.checker.plan_shape import validate_plan_shape
+from feasible.domains import UnknownDomainError, get_domain
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
@@ -136,6 +137,10 @@ def emit_plan_cert(
     cert: dict = {
         "schema_version": SCHEMA_VERSION,
         "plan_cert_id": plan_cert_id,
+        # the SIGNED domain selector: verify resolves the DomainVerifier bundle from
+        # this id (fail-closed on an unknown domain) and rejects any cert rule_id not
+        # in that domain's known_rule_ids (cross-domain isolation; foreign rule rejected).
+        "domain_id": ir.domain_id,
         "rule_pack_ref": {
             "rule_pack_id": "rule-pack-golden",
             "rule_pack_digest": rpd,
@@ -217,6 +222,7 @@ def _fcir_from_cert(cert: dict) -> FCIR:
     return FCIR(
         rules=[Rule.model_validate(r) for r in cert["rules"]],
         instance=Instance.model_validate(cert["instance"]),
+        domain_id=cert.get("domain_id", "manufacturing"),
     )
 
 
@@ -240,6 +246,30 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
             reasons.append("certificate body does not match the signed payload")
     except (ValueError, KeyError):
         reasons.append("malformed signature payload")
+
+    # 2b) resolve the SIGNED domain bundle (fail-closed on an unknown domain) and assert
+    # EVERY rule_id in the cert belongs to that domain's known_rule_ids. The signed
+    # domain_id selects which DomainVerifier's predicates run; without this guard a
+    # re-signed cert could (a) name an unregistered domain (whose verifier supports
+    # nothing) or (b) smuggle a foreign-namespace rule_id (e.g. a dc:* rule) under
+    # manufacturing — bypassing the per-domain isolation. (Fully reconstructed,
+    # re-checked below; this is the cross-domain guard.)
+    domain_id = cert.get("domain_id")
+    if not isinstance(domain_id, str):
+        reasons.append("missing or non-string domain_id")
+        return VerifyResult(ok=False, reasons=reasons)
+    try:
+        _domain, verifier = get_domain(domain_id)
+    except UnknownDomainError:
+        reasons.append(f"unknown domain {domain_id!r} (no registered verifier bundle)")
+        return VerifyResult(ok=False, reasons=reasons)
+    known = verifier.known_rule_ids
+    foreign = sorted(
+        r.get("rule_id") for r in cert.get("rules", [])
+        if r.get("rule_id") not in known
+    )
+    if foreign:
+        reasons.append(f"foreign rule_id(s) {foreign} not in domain {domain_id!r} known_rule_ids")
 
     # 3) reconstruct + re-check the embedded plan (solver-free)
     try:

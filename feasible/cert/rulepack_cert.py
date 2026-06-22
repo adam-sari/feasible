@@ -21,8 +21,9 @@ from pydantic import BaseModel, Field
 
 from feasible.canon.canonical import canonicalize, digest_of, public_key_hex, sign_dsse, verify_dsse
 from feasible.ingest.segment import anchor, sha256_text
-from feasible.cert.plan_cert import VerifyResult, active_rule_ids, public_key_hex_of, rule_pack_digest
+from feasible.cert.plan_cert import VerifyResult, public_key_hex_of, rule_pack_digest
 from feasible.conflict.policy import ConflictPolicy, trusted_policy_set
+from feasible.domains import UnknownDomainError, active_rule_ids_from_dicts, get_domain
 from feasible.govern.backtranslate import back_translate, polarity_matches_source
 from feasible.govern.conflict import Resolution, _scope_realizable
 from feasible.govern.coverage import build_coverage_ledger
@@ -48,6 +49,10 @@ def emit_rulepack_cert(
     cert: dict = {
         "schema_version": SCHEMA_VERSION,
         "rule_pack_id": rule_pack_id,
+        # the SIGNED domain selector (mirrors the Plan Cert): verify resolves the
+        # DomainVerifier bundle from this id (fail-closed) and rejects any cert
+        # rule_id not in that domain's known_rule_ids (cross-domain isolation).
+        "domain_id": ir.domain_id,
         "sources": [{"name": sources_name, "sha256": sha256_text(sop_text)}],
         "sop_text": sop_text,
         "rules": [r.model_dump(mode="json") for r in ir.rules],
@@ -75,7 +80,9 @@ def emit_rulepack_cert(
             "resolutions": [
                 {"obligation": r.conflict.obligation_id, "permission": r.conflict.permission_id,
                  "resolution_mode": r.resolution_mode, "dropped": r.dropped_rule_id,
-                 "rationale": r.rationale, "z3_core": r.conflict.z3_core}
+                 # z3_core is an unsat-CORE SET; its element order is a solver tie-break.
+                 # Canonicalize (sort) so the signed body is reproducible run-to-run.
+                 "rationale": r.rationale, "z3_core": sorted(r.conflict.z3_core)}
                 for r in resolutions
             ],
         },
@@ -120,9 +127,30 @@ def verify_rulepack_cert(
     except (ValueError, KeyError):
         reasons.append("malformed signature payload")
 
+    # resolve the SIGNED domain bundle (fail-closed on an unknown domain) and assert
+    # EVERY rule_id in the pack belongs to that domain's known_rule_ids — so a re-signed
+    # cert can neither name an unregistered domain nor smuggle a foreign-namespace rule_id.
+    domain_id = cert.get("domain_id")
+    if not isinstance(domain_id, str):
+        reasons.append("missing or non-string domain_id")
+        return VerifyResult(ok=False, reasons=reasons)
+    try:
+        _domain, verifier = get_domain(domain_id)
+    except UnknownDomainError:
+        reasons.append(f"unknown domain {domain_id!r} (no registered verifier bundle)")
+        return VerifyResult(ok=False, reasons=reasons)
+    known = verifier.known_rule_ids
+    foreign = sorted(
+        r.get("rule_id") for r in cert.get("rules", [])
+        if r.get("rule_id") not in known
+    )
+    if foreign:
+        reasons.append(f"foreign rule_id(s) {foreign} not in domain {domain_id!r} known_rule_ids")
+
     # reconstruct the rule pack (over its committed instance) and re-derive the digests
     try:
-        ir = FCIR.model_validate({"rules": cert["rules"], "instance": cert["instance"]})
+        ir = FCIR.model_validate(
+            {"rules": cert["rules"], "instance": cert["instance"], "domain_id": domain_id})
     except Exception as e:  # noqa: BLE001
         reasons.append(f"rule reconstruction failed: {e}")
         return VerifyResult(ok=False, reasons=reasons)
@@ -259,17 +287,16 @@ def bundle_binding_reasons(plan_cert: dict, rulepack_cert: dict) -> list[str]:
     if auto_dropped != plan_dropped:
         reasons.append(f"plan-cert dropped {plan_dropped} != rule-pack auto-dropped {auto_dropped}")
 
-    # (4) the active set must be exactly universe-hard-plan-rules minus the auto-drops
-    try:
-        universe = FCIR.model_validate({"rules": rulepack_cert["rules"], "instance": _stub_instance()})
-        expected_active = sorted(set(active_rule_ids(universe)) - set(auto_dropped))
-        if plan_cert["active_rule_set_for_plan"]["active_rule_ids"] != expected_active:
-            reasons.append(
-                f"plan-cert active set {plan_cert['active_rule_set_for_plan']['active_rule_ids']} "
-                f"!= universe minus auto-drops {expected_active}"
-            )
-    except Exception as e:  # noqa: BLE001
-        reasons.append(f"could not reconstruct universe for active-set binding: {e}")
+    # (4) the active set must be exactly universe-hard-plan-rules minus the auto-drops.
+    # The universe hard-plan set is derived from the rule DICTS directly
+    # (instance-independent) — no stub instance, no full FCIR reconstruction.
+    expected_active = sorted(
+        set(active_rule_ids_from_dicts(rulepack_cert["rules"])) - set(auto_dropped))
+    if plan_cert["active_rule_set_for_plan"]["active_rule_ids"] != expected_active:
+        reasons.append(
+            f"plan-cert active set {plan_cert['active_rule_set_for_plan']['active_rule_ids']} "
+            f"!= universe minus auto-drops {expected_active}"
+        )
 
     # (5) shared rule bodies must be byte-identical to the universe (no silent weakening)
     universe_by_id = {r["rule_id"]: r for r in rulepack_cert["rules"]}
@@ -288,8 +315,3 @@ def bundle_binding_reasons(plan_cert: dict, rulepack_cert: dict) -> list[str]:
         if ref is not None and ref.get("digest") != rp_policy.get("digest"):
             reasons.append(f"plan-cert drop {d.get('rule_id')} cites a different conflict policy than the rule-pack")
     return reasons
-
-
-def _stub_instance() -> dict:
-    # rule_pack_digest depends only on rules; FCIR needs an instance to validate.
-    return {"jobs": [], "operations": [], "machines": [], "setup_matrix": {}, "maintenance": [], "horizon": 0}
