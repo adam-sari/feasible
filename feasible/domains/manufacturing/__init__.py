@@ -15,6 +15,10 @@ import feasible.domains.manufacturing.kpi  # noqa: F401  (populates KPI_REGISTRY
 from feasible.domains.manufacturing.domain import ManufacturingDomain
 from feasible.domains.manufacturing.verifier import ManufacturingVerifier
 
-register_domain("manufacturing", ManufacturingDomain(), ManufacturingVerifier())
+# The id this package registers — read by ``bootstrap_domains`` to detect whether
+# this package's bundle is currently registered (precise reload-on-cleared-registry).
+DOMAIN_ID = "manufacturing"
 
-__all__ = ["ManufacturingDomain", "ManufacturingVerifier"]
+register_domain(DOMAIN_ID, ManufacturingDomain(), ManufacturingVerifier())
+
+__all__ = ["ManufacturingDomain", "ManufacturingVerifier", "DOMAIN_ID"]

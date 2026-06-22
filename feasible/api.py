@@ -34,7 +34,7 @@ from feasible.cert.rulepack_cert import (
     verify_rulepack_cert,
 )
 from feasible.checker.checker import check
-from feasible.domains import get_domain
+from feasible.domains import bootstrap_domains, get_domain
 from feasible.domains.base import (
     CertifyResult,
     CertsView,
@@ -58,11 +58,14 @@ _SCENARIOS: list[str] = ["manufacturing"]
 
 
 def _resolve(domain_id: str) -> tuple[Domain, DomainVerifier]:
-    """Resolve the registered domain bundle (fail-closed on an unknown id). The
-    import side-effect registers manufacturing; ``get_domain`` raises
-    ``UnknownDomainError`` for anything unregistered."""
-    import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
+    """Resolve the registered domain bundle (fail-closed on an unknown id).
 
+    ``bootstrap_domains()`` imports every registered-domain package (the explicit
+    facade import-list — manufacturing now, datacenter post-fork) so the verify
+    path resolves all bundles in a fresh process REGARDLESS of which domain
+    modules the caller happened to import. ``get_domain`` raises
+    ``UnknownDomainError`` for anything still unregistered (fail-closed)."""
+    bootstrap_domains()
     return get_domain(domain_id)
 
 

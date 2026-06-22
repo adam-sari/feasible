@@ -23,7 +23,12 @@ from feasible.canon.canonical import canonicalize, digest_of, public_key_hex, si
 from feasible.ingest.segment import anchor, sha256_text
 from feasible.cert.plan_cert import VerifyResult, public_key_hex_of, rule_pack_digest
 from feasible.conflict.policy import ConflictPolicy, trusted_policy_set
-from feasible.domains import UnknownDomainError, active_rule_ids_from_dicts, get_domain
+from feasible.domains import (
+    UnknownDomainError,
+    active_rule_ids_from_dicts,
+    bootstrap_domains,
+    get_domain,
+)
 from feasible.govern.backtranslate import back_translate, polarity_matches_source
 from feasible.govern.conflict import Resolution, _scope_realizable
 from feasible.govern.coverage import build_coverage_ledger
@@ -134,6 +139,11 @@ def verify_rulepack_cert(
     if not isinstance(domain_id, str):
         reasons.append("missing or non-string domain_id")
         return VerifyResult(ok=False, reasons=reasons)
+    # Offline verify must resolve EVERY registered-domain bundle regardless of which
+    # modules the caller imported: bootstrap the registry from the explicit
+    # domain-package import-list (solver-free + LLM-free — only package imports, no
+    # cert-supplied callable). Idempotent; manufacturing byte-identical.
+    bootstrap_domains()
     try:
         _domain, verifier = get_domain(domain_id)
     except UnknownDomainError:

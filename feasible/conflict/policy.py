@@ -82,8 +82,12 @@ def trusted_policy_set() -> frozenset[tuple[str, str]]:
     ``no_permission_outranks_safety`` guard (asserted in the domain-registry tests)
     keeps every entry safety-preserving. Only policies that pass the guard are
     admitted, so a domain cannot widen the trust store with an inverted policy."""
-    import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
-    from feasible.domains import _DOMAINS
+    from feasible.domains import _DOMAINS, bootstrap_domains
+
+    # Bootstrap the explicit registered-domain package import-list so the trust
+    # store resolves EVERY domain's policy in a fresh process regardless of import
+    # order (manufacturing now; the datacenter track appends its package). Idempotent.
+    bootstrap_domains()
 
     pairs: set[tuple[str, str]] = set()
     for _domain_id, (domain, _verifier) in _DOMAINS.items():

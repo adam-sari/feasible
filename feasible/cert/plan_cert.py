@@ -30,7 +30,7 @@ from feasible.canon.canonical import (
 )
 from feasible.checker.checker import CheckResult, check
 from feasible.checker.plan_shape import validate_plan_shape
-from feasible.domains import UnknownDomainError, get_domain
+from feasible.domains import UnknownDomainError, bootstrap_domains, get_domain
 from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import assert_all_hard_rules_supported
@@ -314,6 +314,11 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
     if not isinstance(domain_id, str):
         reasons.append("missing or non-string domain_id")
         return VerifyResult(ok=False, reasons=reasons)
+    # Offline verify must resolve EVERY registered-domain bundle regardless of which
+    # modules the caller imported: bootstrap the registry from the explicit
+    # domain-package import-list (solver-free + LLM-free — only package imports, no
+    # cert-supplied callable). Idempotent; manufacturing byte-identical.
+    bootstrap_domains()
     try:
         _domain, verifier = get_domain(domain_id)
     except UnknownDomainError:
