@@ -21,6 +21,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "hypothesis", "mypy"]
+# Pre-seeded for the forked tracks so neither Track A (React/web console) nor
+# Track C (gemini extraction) edits pyproject post-fork — kills the only A-vs-C
+# shared file. The trust core depends on NEITHER extra.
+web = ["fastapi", "uvicorn[standard]", "httpx"]
+extract = ["google-genai", "python-dotenv"]
 
 [project.scripts]
 feasible = "feasible.cli:app"
@@ -39,4 +44,10 @@ ignore_missing_imports = false
 
 [[tool.mypy.overrides]]
 module = ["ortools.*", "z3", "openpyxl.*", "pandas", "pdfplumber", "markdown_it.*"]
+ignore_missing_imports = true
+
+# Pre-seeded track deps (the `web` + `extract` extras) — overrides so a track that
+# imports them types clean without editing pyproject post-fork.
+[[tool.mypy.overrides]]
+module = ["fastapi.*", "uvicorn.*", "httpx.*", "google.genai.*", "dotenv.*"]
 ignore_missing_imports = true
