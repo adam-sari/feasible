@@ -1,0 +1,134 @@
+{
+  "rule_pack_digest": "e92ddef4eeb19010043bcd69d70855633ac4ae5e95f375a70e376564f514cc25",
+  "instance_ref": {
+    "instance_digest": "eb39e10e2bb35e2745648d585414e191ae5f547ae5b5d71fec13694a02b818cd"
+  },
+  "coverage_ledger": {
+    "complete": true,
+    "denominator": 8,
+    "red_findings": [],
+    "relative_to": "deterministic span enumeration + closed normativity taxonomy"
+  },
+  "conflict_status": {
+    "internal_conflict": false,
+    "resolutions": [
+      {
+        "obligation": "R-SETUP",
+        "permission": "R-4.4",
+        "resolution_mode": "AUTO_BY_POLICY",
+        "dropped": "R-4.4",
+        "rationale": "SAFETY_SANITATION(100) > CUSTOMER_PRIORITY(50) under manufacturing_v1@3fff68902242: Safety / sanitation / allergen control wins over Customer priority acceleration",
+        "z3_core": [
+          "R-4.4",
+          "R-SETUP"
+        ]
+      }
+    ]
+  },
+  "active_rule_set_for_plan": {
+    "active_rule_ids": [
+      "R-5.2",
+      "R-6.1-NIGHT-CLEANOUT",
+      "R-MAINT",
+      "R-NOOVERLAP",
+      "R-ROUTING",
+      "R-SETUP",
+      "R-SHIFT"
+    ],
+    "dropped": [
+      {
+        "rule_id": "R-4.4",
+        "drop_reason": "rule_inactive_for_plan_by_policy",
+        "resolution_mode": "AUTO_BY_POLICY",
+        "conflict_policy_ref": {
+          "policy_id": "manufacturing_v1",
+          "digest": "3fff68902242c0582863c4993293e49318311669900fc3e56ffb8f3754164c4d"
+        }
+      }
+    ],
+    "active_rule_set_digest": "119e8299a7ac97dfbbd9ec53dba292d53a99af25ff47b144642274f6b98c1cae"
+  },
+  "claims_formalization": {
+    "rule_pack_digest_ref": {
+      "value": "e92ddef4eeb19010043bcd69d70855633ac4ae5e95f375a70e376564f514cc25",
+      "provenance": "rule_pack_digest_ref"
+    },
+    "n_hard_rules": {
+      "value": 7,
+      "provenance": "ledger"
+    },
+    "checked_rule_ids": {
+      "value": [
+        "R-6.1-NIGHT-CLEANOUT",
+        "R-MAINT",
+        "R-NOOVERLAP",
+        "R-ROUTING",
+        "R-SETUP",
+        "R-SHIFT"
+      ],
+      "provenance": "ledger"
+    },
+    "structurally_enforced_rule_ids": {
+      "value": [
+        "R-5.2"
+      ],
+      "provenance": "ledger"
+    },
+    "rules_grounded_in_source": {
+      "value": 5,
+      "provenance": "ledger"
+    }
+  },
+  "claims_feasibility": {
+    "checker": {
+      "value": "PASS",
+      "provenance": "checker"
+    },
+    "z3_attest": {
+      "value": "attested",
+      "provenance": "checker"
+    }
+  },
+  "objective": [
+    0,
+    90
+  ],
+  "kpi_vs_incumbent_B": {
+    "weighted_tardiness": {
+      "optimized": 0,
+      "incumbent_b": 1698
+    },
+    "late_priority_orders": {
+      "optimized": 0,
+      "incumbent_b": 2
+    },
+    "total_changeover_time": {
+      "optimized": 90,
+      "incumbent_b": 90
+    }
+  },
+  "incumbent_A_failure": {
+    "violated_rule_ref": "R-6.1-NIGHT-CLEANOUT",
+    "span": {
+      "kind": "text",
+      "source_sha256": "c67256ea01a10688cf4bea99d9b3c468c8421b9946a902322ce0a4e98fa80734",
+      "char_start": 897,
+      "char_end": 991,
+      "quoted_text": "Cleanouts may only be performed during the day shift; the sanitation crew does not work nights",
+      "heading_path": "",
+      "role": "primary_normative"
+    },
+    "counter_witness": {
+      "machine": "Filler-1",
+      "cleanout_start": 1050,
+      "minute_of_day": 1050,
+      "op_class": "SANITATION",
+      "reason": "manual cleanout J1->J2 (23:30)"
+    }
+  },
+  "rule_pack_ref": {
+    "rule_pack_id": "rule-pack-golden",
+    "rule_pack_digest": "e92ddef4eeb19010043bcd69d70855633ac4ae5e95f375a70e376564f514cc25",
+    "rule_pack_cert_signature_ref": null
+  }
+}

@@ -67,10 +67,13 @@ def recompute_objective(ir: FCIR, plan: Plan) -> tuple[int, int]:
     return (weighted_tardiness(ir, plan), total_changeover_time(ir, plan))
 
 
-def solve(ir: FCIR, max_seconds: float = 30.0) -> SolveResult:
+def solve(ir: FCIR, max_seconds: float = 30.0, *, workers: int = 8, seed: int | None = None) -> SolveResult:
     m, vi = build_model(ir)
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max_seconds
+    solver.parameters.num_search_workers = workers
+    if seed is not None:
+        solver.parameters.random_seed = seed
     status = freeze_l1_and_minimize_changeover(m, solver, vi)
     status_name = solver.status_name(status)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
