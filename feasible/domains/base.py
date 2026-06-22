@@ -73,6 +73,14 @@ class DomainVerifier(Protocol):
     rule_kinds: frozenset[str]
     evaluated_rule_ids: frozenset[str]
     structural_rule_kinds: frozenset[str]
+    # The human-readable names of the lexicographic objective levels, in order
+    # (manufacturing: ``("weighted_tardiness", "total_changeover")``). A SIGNED,
+    # per-domain claim: ``emit`` writes it into ``claims.optimality.objective_labels``
+    # (digest-bound) and ``render_html`` reads it from the cert; ``verify``
+    # RE-DERIVES it from this member AND asserts ``len(objective_labels) ==
+    # len(objective)`` (a signed claim that isn't re-derived is forgeable under the
+    # re-sign threat model). ``len(objective_labels)`` is the arity of ``objective``.
+    objective_labels: tuple[str, ...]
     # The complete set of rule_ids this domain owns: the evaluated (checked) ids,
     # the structural (compiled-only) ids, and the conflict-only permission ids.
     # The signed ``domain_id`` selects the bundle; ``verify`` rejects any cert

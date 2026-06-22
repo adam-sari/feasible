@@ -228,6 +228,12 @@ def emit_plan_cert(
                 "optimal_per_cpsat": _leaf(result.status == "OPTIMAL", "solver"),
                 "gap_bps": _leaf(gap_bps, "solver"),
                 "objective": _leaf(objective, "objective_recompute"),
+                # the per-domain names of the lexicographic objective levels,
+                # in order (resolved from the SIGNED-domain ``verifier``, never a
+                # cert field). A signed ledger leaf: ``verify`` RE-DERIVES it from
+                # ``verifier.objective_labels`` + asserts its arity matches the
+                # objective tuple; ``render_html`` reads it (no hardcoded string).
+                "objective_labels": _leaf(list(verifier.objective_labels), "ledger"),
                 "tripwire_passed": _leaf(tripwire_ok, "solver"),
                 "label": _leaf("optimal per CP-SAT, same-engine tripwire", "solver"),
             },
@@ -345,6 +351,25 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
     claimed = cert["claims"]["optimality"]["objective"]["value"]
     if recomputed != list(claimed):
         reasons.append(f"objective mismatch: recomputed {recomputed} != cert {claimed}")
+
+    # 4b) RE-DERIVE the per-domain objective LABELS (a signed claim that isn't
+    # re-derived is forgeable under the re-sign threat model). The labels must
+    # equal the SIGNED-domain verifier's ``objective_labels`` AND name exactly the
+    # objective levels (arity == len(objective)). The same per-domain ``verifier``
+    # is already resolved at the domain guard above, so this covers manufacturing
+    # AND a second domain automatically.
+    claimed_labels = cert["claims"]["optimality"].get("objective_labels", {}).get("value")
+    expected_labels = list(verifier.objective_labels)
+    if claimed_labels != expected_labels:
+        reasons.append(
+            f"objective_labels mismatch: cert {claimed_labels} != "
+            f"domain {domain_id!r} verifier {expected_labels}"
+        )
+    elif len(claimed_labels) != len(claimed):
+        reasons.append(
+            f"objective_labels arity {len(claimed_labels)} != objective arity {len(claimed)} "
+            "(the labels must name exactly the objective levels)"
+        )
 
     # 5) self-consistency. rule_pack_ref.rule_pack_digest is an OPAQUE universe token
     # (tamper-protected by the body-vs-signature binding above; NOT re-derivable from the
@@ -482,6 +507,10 @@ def render_html(plan_cert: dict) -> str:
 
     c = plan_cert["claims"]
     obj = c["optimality"]["objective"]["value"]
+    # the objective level names are SOURCED FROM THE SIGNED CERT (verify re-derives
+    # them) — never a hardcoded string. A per-domain cert renders ITS own labels.
+    obj_labels = c["optimality"].get("objective_labels", {}).get("value", [])
+    obj_label_str = ", ".join(obj_labels)
     feas = c["feasibility"]["checker"]["value"]
     z3 = c["feasibility"]["z3_attest"]["value"]
     opt_label = c["optimality"]["label"]["value"]
@@ -521,7 +550,7 @@ details{{margin-top:1rem}} pre{{background:#f6f6f6;padding:1rem;overflow:auto;fo
 (rule-pack digest <code>{plan_cert['rule_pack_ref']['rule_pack_digest'][:16]}…</code>)</div>
 <div class="claim"><b>② Feasibility:</b> checker <span class="{'pass' if feas=='PASS' else 'fail'}">{feas}</span>
 · Z3 {z3} (two independent verifiers)</div>
-<div class="claim"><b>③ Optimality:</b> objective (weighted_tardiness, changeover) = {obj} — {opt_label}; tripwire_passed={tripwire}</div>
+<div class="claim"><b>③ Optimality:</b> objective ({obj_label_str}) = {obj} — {opt_label}; tripwire_passed={tripwire}</div>
 
 <div class="claim gotcha"><b>🎯 Gotcha — incumbent A rejected:</b> violated <code>{inc_a.get('violated_rule_ref')}</code><br>
 cited SOP clause: <i>"{span_q}"</i><br>

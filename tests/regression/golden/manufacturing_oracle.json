@@ -93,6 +93,10 @@
     0,
     90
   ],
+  "objective_labels": [
+    "weighted_tardiness",
+    "total_changeover"
+  ],
   "kpi_vs_incumbent_B": {
     "weighted_tardiness": {
       "optimized": 0,

@@ -63,6 +63,9 @@ def oracle_surface(rp: dict, pc: dict) -> dict:
         "claims_formalization": pc["claims"]["formalization"],
         "claims_feasibility": pc["claims"]["feasibility"],
         "objective": pc["claims"]["optimality"]["objective"]["value"],
+        # the one additive signed field in Spec 0.5 (Task 3): the per-domain
+        # objective LABELS, re-derived in verify + read by render_html.
+        "objective_labels": pc["claims"]["optimality"]["objective_labels"]["value"],
         "kpi_vs_incumbent_B": pc["kpi_vs_incumbent_B"],
         "kpi_function_refs": pc["kpi_function_refs"],
         "incumbent_A_failure": pc["incumbent_A_failure"],

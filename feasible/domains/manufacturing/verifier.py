@@ -85,6 +85,12 @@ class ManufacturingVerifier:
         "R-ROUTING", "R-NOOVERLAP", "R-SETUP", "R-MAINT", "R-SHIFT", "R-6.1-NIGHT-CLEANOUT",
     })
     structural_rule_kinds: frozenset[str] = frozenset({"non_preemption"})
+    # The names of the FJSP lexicographic objective levels, in order — matching
+    # ``solve.orchestrate.recompute_objective`` (weighted_tardiness, then
+    # total_changeover). A SIGNED, per-domain claim (``emit`` writes the leaf,
+    # ``render_html`` reads it, ``verify`` re-derives it + checks arity); a
+    # NON-FJSP domain declares ITS own labels for ITS own objective tuple.
+    objective_labels: tuple[str, ...] = ("weighted_tardiness", "total_changeover")
     # The complete set of rule_ids manufacturing owns (the cross-domain isolation
     # guard checks this set against a cert's signed domain). It is the evaluated
     # (checked) ids PLUS the structural-kind-bearing id (``R-5.2``, the

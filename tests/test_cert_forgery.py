@@ -356,3 +356,20 @@ def test_missing_rule_id_is_foreign_not_crash_rulepack_cert(bundle) -> None:
     res = verify_rulepack_cert(bad_rp, bundle["key"].public_key())  # must NOT raise
     assert res.ok is False
     assert any("foreign rule_id" in r for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A17 — re-label the (signed) objective_labels to a domain the cert never
+# optimized (Task 3: objective_labels is a SIGNED, per-domain claim that
+# ``verify`` RE-DERIVES from the domain verifier — a signed claim that isn't
+# re-derived is forgeable under this project's re-sign threat model. The render
+# reads these labels, so a fabricated pair would mislabel the headline objective
+# in the demo). Parametrized over domain via the ``bundle`` fixture.
+# ---------------------------------------------------------------------------
+def test_forged_objective_labels_is_rejected(bundle) -> None:
+    bad_pc = copy.deepcopy(bundle["pc"])
+    bad_pc["claims"]["optimality"]["objective_labels"]["value"] = ["cost_savings", "throughput"]
+    _resign(bad_pc, bundle["key"])
+    res = verify_plan_cert(bad_pc, bundle["key"].public_key())
+    assert res.ok is False
+    assert any("objective_labels" in r for r in res.reasons)
