@@ -11,6 +11,7 @@ isolation seam (signed ``domain_id`` + per-domain rule_id ownership).
 from __future__ import annotations
 
 from feasible.domains import register_domain
+import feasible.domains.manufacturing.kpi  # noqa: F401  (populates KPI_REGISTRY["manufacturing"])
 from feasible.domains.manufacturing.domain import ManufacturingDomain
 from feasible.domains.manufacturing.verifier import ManufacturingVerifier
 

@@ -299,3 +299,35 @@ def test_unrealizable_conflict_drop_rejected(bundle) -> None:
     res = verify_rulepack_cert(bad, bundle["key"].public_key())
     assert res.ok is False
     assert any("not realizable" in r for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A14 — swap a KPI value AND its function_id so a naive recompute would "agree"
+# (Task 11: verify re-derives every KPI from the STATIC KPI_REGISTRY fn — never a
+# cert field — and binds the cert's (function_id, function_version,
+# input_schema_digest) triple to the registry's, so a fn rename cannot launder a
+# tampered KPI value).
+# ---------------------------------------------------------------------------
+def test_forged_kpi_function_id_is_rejected(bundle) -> None:
+    bad_pc = copy.deepcopy(bundle["pc"])
+    bad_pc["kpi_vs_incumbent_B"]["weighted_tardiness"]["incumbent_b"] = 1
+    bad_pc["kpi_function_refs"]["weighted_tardiness"]["function_id"] = "mfg:fabricated"
+    _resign(bad_pc, bundle["key"])
+    res = verify_plan_cert(bad_pc, bundle["key"].public_key())
+    assert res.ok is False
+    assert any("kpi" in r.lower() for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A15 — cite a NON-gotcha hard-rule failure as the incumbent-A gotcha (Task 11:
+# verify pins incumbent_A_failure.violated_rule_ref to the domain verifier's
+# gotcha_rule_id() — the violations[0] fallback is removed, so an arbitrary hard
+# failure cannot pose as the hero gotcha).
+# ---------------------------------------------------------------------------
+def test_nongotcha_incumbent_a_failure_rejected(bundle) -> None:
+    bad_pc = copy.deepcopy(bundle["pc"])
+    bad_pc["incumbent_A_failure"]["violated_rule_ref"] = "R-SETUP"  # a real rule, but not the gotcha
+    _resign(bad_pc, bundle["key"])
+    res = verify_plan_cert(bad_pc, bundle["key"].public_key())
+    assert res.ok is False
+    assert any("gotcha" in r.lower() or "incumbent_A_failure" in r for r in res.reasons)

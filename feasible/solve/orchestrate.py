@@ -19,7 +19,11 @@ from feasible.ir.domain import FCIR, Plan
 class SolveResult(BaseModel):
     plan: Plan | None
     status: str
-    objective: tuple[int, int] | None  # (weighted_tardiness, total_changeover)
+    # the lexicographic objective tuple. Variable-length (``tuple[int, ...]``) so a
+    # domain with more than two lexicographic levels (e.g. datacenter) can certify
+    # its own objective; manufacturing emits the 2-tuple
+    # (weighted_tardiness, total_changeover).
+    objective: tuple[int, ...] | None
     gap: float | None
 
 
@@ -62,8 +66,13 @@ def total_changeover_time(ir: FCIR, plan: Plan) -> int:
     return total
 
 
-def recompute_objective(ir: FCIR, plan: Plan) -> tuple[int, int]:
-    """The canonical integer objective tuple recomputed from the plan."""
+def recompute_objective(ir: FCIR, plan: Plan) -> tuple[int, ...]:
+    """The canonical integer objective tuple recomputed from the plan.
+
+    Variable-length (``tuple[int, ...]``): manufacturing's is the 2-tuple
+    (weighted_tardiness, total_changeover); a domain with more lexicographic
+    levels returns a longer tuple. ``optimality_tripwire`` and the cert's
+    ``objective`` leaf accept the variable length unchanged."""
     return (weighted_tardiness(ir, plan), total_changeover_time(ir, plan))
 
 

@@ -323,10 +323,22 @@ class ManufacturingVerifier:
         raise NotImplementedError("manufacturing objective() is relocated in a later task")
 
     def kpis(self) -> list[Any]:
-        raise NotImplementedError("manufacturing kpis() is relocated in a later task")
+        """The allow-listed (emit-only) KPI recompute entries, keyed by KPI name.
+
+        Returns the manufacturing ``KPI_REGISTRY`` entries (the three existing
+        recompute fns + their version triple). ``verify`` resolves the fn from the
+        registry, never from a cert field; this is the emit-side view of the same
+        statically-registered table."""
+        from feasible.domains.base import KPI_REGISTRY
+
+        return [{"key": key, **entry} for key, entry in KPI_REGISTRY[self.domain_id].items()]
 
     def gotcha_rule_id(self) -> str | None:
-        raise NotImplementedError("manufacturing gotcha_rule_id() is relocated in a later task")
+        """The single rule the headline incumbent-A gotcha cites: the night-shift
+        sanitation ban (``R-6.1-NIGHT-CLEANOUT``). ``verify`` asserts the cert's
+        ``incumbent_A_failure.violated_rule_ref`` equals THIS id (no ``violations[0]``
+        fallback) — so an arbitrary hard-rule failure cannot pose as the hero gotcha."""
+        return "R-6.1-NIGHT-CLEANOUT"
 
     def classify_segment(self, seg: Segment) -> str:
         """The deterministic keyword normativity classifier (relocated verbatim

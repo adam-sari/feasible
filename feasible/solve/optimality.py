@@ -15,8 +15,16 @@ from feasible.compile.cpsat import build_model
 from feasible.ir.domain import FCIR
 
 
-def optimality_tripwire(ir: FCIR, V: tuple[int, int], max_seconds: float = 20.0) -> bool:
-    """True iff no feasible plan is lexicographically better than V."""
+def optimality_tripwire(ir: FCIR, V: tuple[int, ...], max_seconds: float = 20.0) -> bool:
+    """True iff no feasible plan is lexicographically better than V.
+
+    ``V`` is the variable-length lexicographic objective (``tuple[int, ...]``).
+    The manufacturing CP-SAT model exposes exactly two lexicographic levels
+    (weighted_tardiness, total_changeover), so this asserts ``len(V) == 2`` and
+    encodes the two-level strict-improvement disjunction below; a domain with a
+    deeper objective supplies its own model + tripwire encoding."""
+    if len(V) != 2:
+        raise ValueError(f"manufacturing optimality_tripwire expects a 2-level objective, got {V!r}")
     m, vi = build_model(ir)
     v0, v1 = V
     better_l1 = m.new_bool_var("better_l1")

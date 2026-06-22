@@ -31,16 +31,11 @@ from feasible.canon.canonical import (
 from feasible.checker.checker import CheckResult, check
 from feasible.checker.plan_shape import validate_plan_shape
 from feasible.domains import UnknownDomainError, get_domain
+from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
-from feasible.solve.orchestrate import (
-    SolveResult,
-    late_priority_orders,
-    recompute_objective,
-    total_changeover_time,
-    weighted_tardiness,
-)
+from feasible.solve.orchestrate import SolveResult, recompute_objective
 from feasible.smt.attest import AttestResult
 
 SCHEMA_VERSION = "feasible.plan_cert.v1"
@@ -84,27 +79,53 @@ def structurally_enforced_rule_ids(ir: FCIR) -> list[str]:
     return sorted(r.rule_id for r in ir.hard_plan_rules() if r.kind in STRUCTURAL_RULE_KINDS)
 
 
+def _kpi_registry_for(domain_id: str) -> dict:
+    """The statically-registered, allow-listed KPI table for ``domain_id``.
+
+    ``verify`` (and the emitter) resolve every KPI recompute ``fn`` from HERE —
+    never from a cert field — so a re-signed cert cannot smuggle a callable. A
+    domain with no registered KPIs fails closed (``KeyError``)."""
+    return KPI_REGISTRY[domain_id]
+
+
 def _kpi(ir: FCIR, optimized: Plan, incumbent_b: Plan) -> dict:
+    """Per-KPI ``{optimized, incumbent_b}`` recomputed by the domain's registered
+    fns (resolved from ``KPI_REGISTRY[ir.domain_id]``, never a cert callable)."""
+    table = _kpi_registry_for(ir.domain_id)
     return {
-        "weighted_tardiness": {
-            "optimized": weighted_tardiness(ir, optimized),
-            "incumbent_b": weighted_tardiness(ir, incumbent_b),
-        },
-        "late_priority_orders": {
-            "optimized": late_priority_orders(ir, optimized),
-            "incumbent_b": late_priority_orders(ir, incumbent_b),
-        },
-        "total_changeover_time": {
-            "optimized": total_changeover_time(ir, optimized),
-            "incumbent_b": total_changeover_time(ir, incumbent_b),
-        },
+        key: {
+            "optimized": entry["fn"](ir, optimized),
+            "incumbent_b": entry["fn"](ir, incumbent_b),
+        }
+        for key, entry in table.items()
     }
 
 
-def _incumbent_a_failure(ir: FCIR, incumbent_a: Plan) -> dict:
+def _kpi_function_refs(domain_id: str) -> dict:
+    """The per-KPI ``(function_id, function_version, input_schema_digest)`` version
+    triples drawn from the registry. Echoed into the signed body; ``verify`` asserts
+    byte-equality with the registry triple (a re-signed cert can't claim a different
+    function for a KPI value). A plain dict (sorted-key canonicalization) — no float."""
+    table = _kpi_registry_for(domain_id)
+    return {
+        key: {
+            "function_id": entry["function_id"],
+            "function_version": entry["function_version"],
+            "input_schema_digest": entry["input_schema_digest"],
+        }
+        for key, entry in table.items()
+    }
+
+
+def _incumbent_a_failure(ir: FCIR, incumbent_a: Plan, verifier: DomainVerifier) -> dict:
+    """The headline incumbent-A gotcha. The cited ``violated_rule_ref`` is the
+    domain's ``gotcha_rule_id()`` ONLY — there is no ``violations[0]`` fallback, so
+    an arbitrary hard-rule failure can never pose as the hero gotcha (``verify``
+    asserts this equality)."""
     res = check(incumbent_a, ir)
-    night = [v for v in res.violations if v.rule_id == "R-6.1-NIGHT-CLEANOUT"]
-    v = night[0] if night else (res.violations[0] if res.violations else None)
+    gotcha = verifier.gotcha_rule_id()
+    night = [v for v in res.violations if v.rule_id == gotcha]
+    v = night[0] if night else None
     if v is None:
         return {"violated_rule_ref": None, "span": None, "counter_witness": {}}
     return {
@@ -128,10 +149,14 @@ def emit_plan_cert(
     rule_pack_digest_override: str | None = None,
 ) -> dict:
     assert_all_hard_rules_supported(ir)  # never certify a plan against an unevaluated hard rule
+    # resolve the SIGNED domain bundle: the KPI recompute fns + the gotcha rule id
+    # come from the statically-registered DomainVerifier, NOT from any cert field.
+    _domain, verifier = get_domain(ir.domain_id)
     dropped = dropped or []
     rpd = rule_pack_digest_override or rule_pack_digest(ir)  # universe digest when called from certify
     objective = list(result.objective) if result.objective else [0, 0]
-    tripwire_ok = optimality_tripwire(ir, (objective[0], objective[1]))
+    # variable-length lexicographic objective tuple (manufacturing emits 2 levels)
+    tripwire_ok = optimality_tripwire(ir, tuple(objective))
     gap_bps = 0 if (result.gap == 0.0) else -1  # -1 = not proven optimal
 
     cert: dict = {
@@ -187,7 +212,11 @@ def emit_plan_cert(
             },
         },
         "kpi_vs_incumbent_B": _kpi(ir, plan, incumbent_b),
-        "incumbent_A_failure": _incumbent_a_failure(ir, incumbent_a),
+        # the per-KPI (function_id, function_version, input_schema_digest) version
+        # triples — verify re-derives each KPI from KPI_REGISTRY[domain_id][key]["fn"]
+        # and asserts the cert triple equals the registered one (no cert callable).
+        "kpi_function_refs": _kpi_function_refs(ir.domain_id),
+        "incumbent_A_failure": _incumbent_a_failure(ir, incumbent_a, verifier),
         "trust_boundary": {
             "verification": "IR-relative: the plan satisfies the approved IR; the source->IR edge "
                             "is closed by the extraction-independence layer + human gate (Build B). "
@@ -343,11 +372,32 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
         reasons.append("incumbent_b is not a feasible baseline (the KPI denominator must be a real plan)")
     if validate_plan_shape(inc_a, ir):
         reasons.append("incumbent_a is not a well-formed plan over the certified instance")
-    if cert["incumbent_A_failure"].get("violated_rule_ref") is None:
-        reasons.append("incumbent_A_failure claims no violation (the gotcha must be a real hard-rule failure)")
+    # the cited incumbent-A failure MUST be the domain's headline gotcha rule (there is
+    # no longer a violations[0] fallback in the emitter): an arbitrary hard-rule failure
+    # cannot pose as the hero gotcha. This both rejects a null/forged ref AND pins the
+    # rule identity to the verifier's gotcha_rule_id().
+    gotcha = verifier.gotcha_rule_id()
+    if cert["incumbent_A_failure"].get("violated_rule_ref") != gotcha:
+        reasons.append(
+            f"incumbent_A_failure.violated_rule_ref "
+            f"{cert['incumbent_A_failure'].get('violated_rule_ref')!r} != domain gotcha rule {gotcha!r} "
+            f"(the gotcha must be a real failure of the certified gotcha rule)"
+        )
+
+    # the KPI value table must equal the table re-derived by the STATICALLY-REGISTERED
+    # domain fns (resolved from KPI_REGISTRY[domain_id], never a cert callable) ...
     if _kpi(ir, plan, inc_b) != cert["kpi_vs_incumbent_B"]:
         reasons.append("kpi_vs_incumbent_B claim != re-derived KPI")
-    if _incumbent_a_failure(ir, inc_a) != cert["incumbent_A_failure"]:
+    # ... AND the cert's per-KPI (function_id, function_version, input_schema_digest)
+    # version triple must equal the registry's triple byte-for-byte — so a re-signed cert
+    # cannot pair a tampered KPI value with a fabricated/renamed function to look honest.
+    if cert.get("kpi_function_refs") != _kpi_function_refs(domain_id):
+        reasons.append(
+            "kpi_function_refs claim != registered KPI version triple "
+            "(function_id/function_version/input_schema_digest mismatch)"
+        )
+
+    if _incumbent_a_failure(ir, inc_a, verifier) != cert["incumbent_A_failure"]:
         reasons.append("incumbent_A_failure claim != re-derived failure")
 
     return VerifyResult(ok=len(reasons) == 0, reasons=reasons)
