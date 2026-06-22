@@ -295,6 +295,18 @@ class ManufacturingVerifier:
                     if cm == mc:
                         track(f"R-MAINT:{mc}:cleanout{k}:{w}", z3.Or(ce_vars[k] <= mstart, cs_vars[k] >= mend))
 
+        # R-SHIFT: every scheduled op stays within the operating horizon (the
+        # parallel of the checker's start>=0 & end<=horizon predicate; without this
+        # block R-SHIFT was checked polynomially but UN-attested by Z3 — a fail-open
+        # the registry-membership meta-test now forbids).
+        if ir.has_active("R-SHIFT"):
+            for op in inst.operations:
+                if op.op_id in plan.assignments:
+                    track(
+                        f"R-SHIFT:{op.op_id}",
+                        z3.And(start[op.op_id] >= 0, end[op.op_id] <= inst.horizon),
+                    )
+
         # R-6.1-NIGHT-CLEANOUT: each cleanout fully inside a day window
         night_rule = ir.rule("R-6.1-NIGHT-CLEANOUT")
         if ir.has_active("R-6.1-NIGHT-CLEANOUT"):
@@ -316,11 +328,25 @@ class ManufacturingVerifier:
     # them yet (the oracle + suite prove only check/z3 are exercised).       #
     # --------------------------------------------------------------------- #
 
-    def compile(self, ir: Any, model: Any) -> Any:  # noqa: A003
-        raise NotImplementedError("manufacturing compile() is relocated in a later task")
+    def compile(self, ir: Any, model: Any = None) -> Any:  # noqa: A003
+        """Build the manufacturing CP-SAT model for ``ir``.
+
+        Delegates to the existing ``feasible.compile.cpsat.build_model`` (which
+        constructs the model + var index from the IR — the ``model`` argument is
+        accepted for the seam signature but the builder owns model construction).
+        Lazy import to avoid a compile<->domain import cycle."""
+        from feasible.compile.cpsat import build_model
+
+        return build_model(ir)
 
     def objective(self, ir: Any, plan: Any) -> tuple[int, ...]:
-        raise NotImplementedError("manufacturing objective() is relocated in a later task")
+        """The canonical lexicographic objective recomputed from ``plan``.
+
+        Delegates to the existing ``feasible.solve.orchestrate.recompute_objective``
+        (variable-length tuple). Lazy import to avoid a solve<->domain cycle."""
+        from feasible.solve.orchestrate import recompute_objective
+
+        return recompute_objective(ir, plan)
 
     def kpis(self) -> list[Any]:
         """The allow-listed (emit-only) KPI recompute entries, keyed by KPI name.

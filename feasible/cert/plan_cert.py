@@ -293,9 +293,12 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
         reasons.append(f"unknown domain {domain_id!r} (no registered verifier bundle)")
         return VerifyResult(ok=False, reasons=reasons)
     known = verifier.known_rule_ids
+    # Coerce to str so a rule dict missing rule_id (-> None) alongside a string
+    # foreign id is reported as foreign (still "not in known") rather than crashing
+    # sorted() on a mixed None/str list (TypeError). A None/missing rule_id is foreign.
     foreign = sorted(
-        r.get("rule_id") for r in cert.get("rules", [])
-        if r.get("rule_id") not in known
+        str(rid) for r in cert.get("rules", [])
+        if (rid := r.get("rule_id")) not in known
     )
     if foreign:
         reasons.append(f"foreign rule_id(s) {foreign} not in domain {domain_id!r} known_rule_ids")

@@ -326,3 +326,33 @@ def test_nongotcha_incumbent_a_failure_rejected(bundle) -> None:
     res = verify_plan_cert(bad_pc, bundle["key"].public_key())
     assert res.ok is False
     assert any("gotcha" in r.lower() or "incumbent_A_failure" in r for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A16 — the foreign-rule guard must FAIL CLOSED on a rule dict missing rule_id.
+# A re-signed cert whose embedded ``rules`` carries a dict with NO ``rule_id``
+# (-> None) alongside a string foreign id used to crash the guard's
+# ``sorted([None, "x"])`` with a TypeError (a crash, not a clean rejection). The
+# guard now coerces to str: the None/missing id is itself foreign, so both the
+# plan-cert and rule-pack verifiers return ok=False with a reason and DO NOT raise.
+# ---------------------------------------------------------------------------
+def test_missing_rule_id_is_foreign_not_crash_plan_cert(bundle) -> None:
+    bad_pc = copy.deepcopy(bundle["pc"])
+    bad_pc["rules"] = [*bad_pc["rules"],
+                       {"kind": "no_overlap"},                    # missing rule_id -> None
+                       {"rule_id": "dc:foreign-rule", "kind": "no_overlap"}]
+    _resign(bad_pc, bundle["key"])
+    res = verify_plan_cert(bad_pc, bundle["key"].public_key())  # must NOT raise
+    assert res.ok is False
+    assert any("foreign rule_id" in r for r in res.reasons)
+
+
+def test_missing_rule_id_is_foreign_not_crash_rulepack_cert(bundle) -> None:
+    bad_rp = copy.deepcopy(bundle["rp"])
+    bad_rp["rules"] = [*bad_rp["rules"],
+                       {"kind": "no_overlap"},                    # missing rule_id -> None
+                       {"rule_id": "dc:foreign-rule", "kind": "no_overlap"}]
+    _resign(bad_rp, bundle["key"])
+    res = verify_rulepack_cert(bad_rp, bundle["key"].public_key())  # must NOT raise
+    assert res.ok is False
+    assert any("foreign rule_id" in r for r in res.reasons)
