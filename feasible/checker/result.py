@@ -12,6 +12,8 @@ class Violation(BaseModel):
     span: TextSpan | CellRef | None = None
     message: str
     counter_witness: dict = Field(default_factory=dict)
+    witness_kind: str = ""
+    witness_version: str = "v1"
 
 
 class CheckResult(BaseModel):
