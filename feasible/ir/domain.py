@@ -151,6 +151,7 @@ class Instance(BaseModel):
 class FCIR(BaseModel):
     rules: list[Rule]
     instance: Instance
+    domain_id: str = "manufacturing"
 
     def hard_plan_rules(self) -> list[Rule]:
         return [
