@@ -35,6 +35,13 @@ class Cumulative(BaseModel):
     capacity: int
 
 
+class CoverageFloor(BaseModel):
+    group_id: str
+    units: list[str]
+    floor: int
+    horizon: int
+
+
 class Precedence(BaseModel):
     """``start[after_op] >= end[before_op] + gap`` (a difference constraint)."""
 
