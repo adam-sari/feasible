@@ -52,10 +52,51 @@ MANUFACTURING_POLICY = ConflictPolicy(
     ],
 )
 
-# The published trust store: the (policy_id, digest) pairs a verifier will accept as an
-# authority for conflict resolution. A re-signed cert that embeds an INVERTED policy (e.g.
-# customer > safety) is rejected here at the root — the priority lattice that decides which
-# rule may be dropped is pinned to a published policy, never re-derivable from cert bytes.
-DEFAULT_TRUSTED_POLICIES: frozenset[tuple[str, str]] = frozenset(
-    {(MANUFACTURING_POLICY.policy_id, MANUFACTURING_POLICY.digest())}
-)
+# The class id whose priority every other class must NOT strictly exceed: the safety /
+# sanitation obligation that the "safety wins / permission dropped" invariant protects.
+SAFETY_CLASS_ID = "SAFETY_SANITATION"
+
+
+def no_permission_outranks_safety(policy: ConflictPolicy) -> bool:
+    """The per-domain conflict-policy guard (design §1.6): under ``policy`` NO class
+    may strictly outrank the safety class, so a safety obligation can never be the
+    AUTO-dropped side of a conflict — a clash a permission would win must ESCALATE.
+
+    Returns ``True`` iff the policy is safe to trust. A policy missing the safety
+    class entirely fails the guard (fail-closed: a domain whose policy cannot even
+    name its safety obligation must not be auto-trusted)."""
+    safety = policy.priority(SAFETY_CLASS_ID)
+    if safety is None:
+        return False
+    return all(c.priority <= safety for c in policy.class_priorities)
+
+
+def trusted_policy_set() -> frozenset[tuple[str, str]]:
+    """The published trust store, assembled from the policies of the REGISTERED
+    domains (design §1.6) — not a hand-written global frozenset. A re-signed cert
+    that embeds an INVERTED policy (e.g. customer > safety) is rejected at the root:
+    the priority lattice that decides which rule may be dropped is pinned to a
+    published, registered-domain policy, never re-derivable from cert bytes.
+
+    Adding a domain policy is therefore a reviewed, tested act — the
+    ``no_permission_outranks_safety`` guard (asserted in the domain-registry tests)
+    keeps every entry safety-preserving. Only policies that pass the guard are
+    admitted, so a domain cannot widen the trust store with an inverted policy."""
+    import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
+    from feasible.domains import _DOMAINS
+
+    pairs: set[tuple[str, str]] = set()
+    for _domain_id, (domain, _verifier) in _DOMAINS.items():
+        policy = domain.policy()
+        if policy is None:
+            continue
+        if not no_permission_outranks_safety(policy):
+            continue  # fail-closed: never admit a safety-inverting policy
+        pairs.add((policy.policy_id, policy.digest()))
+    return frozenset(pairs)
+
+
+# Backwards-compatible alias: the published trust store as a value (computed from the
+# registered domains at import time). Callers may pass it as ``trusted_policies=`` or
+# omit the argument to let ``verify_rulepack_cert`` resolve ``trusted_policy_set()``.
+DEFAULT_TRUSTED_POLICIES: frozenset[tuple[str, str]] = trusted_policy_set()

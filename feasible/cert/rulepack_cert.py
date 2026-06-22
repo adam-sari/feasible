@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from feasible.canon.canonical import canonicalize, digest_of, public_key_hex, sign_dsse, verify_dsse
 from feasible.ingest.segment import anchor, sha256_text
 from feasible.cert.plan_cert import VerifyResult, active_rule_ids, public_key_hex_of, rule_pack_digest
-from feasible.conflict.policy import ConflictPolicy
+from feasible.conflict.policy import ConflictPolicy, trusted_policy_set
 from feasible.govern.backtranslate import back_translate, polarity_matches_source
 from feasible.govern.conflict import Resolution, _scope_realizable
 from feasible.govern.coverage import build_coverage_ledger
@@ -164,10 +164,14 @@ def verify_rulepack_cert(
         return VerifyResult(ok=False, reasons=reasons)
     if policy.digest() != cert["conflict_policy_ref"]["digest"]:
         reasons.append("conflict_policy digest mismatch")
-    if trusted_policies is not None:
-        ref = (cert["conflict_policy_ref"].get("policy_id"), cert["conflict_policy_ref"].get("digest"))
-        if ref not in trusted_policies:
-            reasons.append(f"conflict policy {ref[0]}@{(ref[1] or '')[:12]} is not in the trusted policy set")
+    # the trust store defaults to the per-domain registry (trusted_policy_set), assembled
+    # from the registered domains' safety-preserving policies; pass an explicit frozenset
+    # (e.g. frozenset()) only to pin/override it. A re-signed cert embedding an INVERTED
+    # policy is rejected here at the root.
+    store = trusted_policy_set() if trusted_policies is None else trusted_policies
+    ref = (cert["conflict_policy_ref"].get("policy_id"), cert["conflict_policy_ref"].get("digest"))
+    if ref not in store:
+        reasons.append(f"conflict policy {ref[0]}@{(ref[1] or '')[:12]} is not in the trusted policy set")
     by_id = {r.rule_id: r for r in ir.rules}
     for res in cert["conflict_status"]["resolutions"]:
         obl, perm, mode = by_id.get(res["obligation"]), by_id.get(res["permission"]), res["resolution_mode"]
