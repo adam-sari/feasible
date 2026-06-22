@@ -34,8 +34,11 @@ def classify(seg: Segment) -> str:
         return "metadata"
     if not text:
         return "boilerplate"
-    if "take precedence" in text or "are expected" in text or "priority" in text:
-        return "soft_target"  # §3.1/§3.4 are reclassified soft (due dates are soft)
+    # A HARD deontic operator ALWAYS wins over the soft-target keywords: a clause that
+    # both mentions 'priority' AND says 'may not' / 'must' is a hard rule, never a soft
+    # target. Testing the soft keywords first (as a pre-empt) would let any hard clause
+    # containing the word 'priority' slip through uncovered without going RED — the
+    # omission moat must not fail open.
     prohibition = any(k in text for k in ["may only", "may not", "does not", "not work", "unavailable", "no filler"])
     obligation = any(k in text for k in ["is required", "must ", "shall"])
     conditional = "when" in text or "if " in text
@@ -45,6 +48,9 @@ def classify(seg: Segment) -> str:
         return "conditional_obligation"
     if obligation:
         return "hard_obligation"
+    # only with NO hard operator present are priority/precedence/expectation soft (§3.1/§3.4)
+    if "take precedence" in text or "are expected" in text or "priority" in text:
+        return "soft_target"
     return "boilerplate"
 
 

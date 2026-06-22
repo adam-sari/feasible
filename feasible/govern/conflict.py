@@ -99,20 +99,23 @@ def resolve_conflicts(ir: FCIR, conflicts: list[Conflict], policy: ConflictPolic
             o.exception_mode != ExceptionMode.NONE or p.exception_mode != ExceptionMode.NONE
             or bool(o.overrides) or bool(p.overrides)
         )
-        if pa is not None and pb is not None and pa != pb and not has_exception:
-            loser, winner = (p, o) if pa > pb else (o, p)
-            win_label = policy.label(winner.resolution_class or "") or winner.resolution_class
-            lose_label = policy.label(loser.resolution_class or "") or loser.resolution_class
+        # AUTO-resolution may ONLY drop the conflict-only PERMISSION, and only when the
+        # obligation's class strictly OUTRANKS the permission's. A clash where the
+        # permission would override a HARD obligation is never auto-resolved — silently
+        # disabling a hard rule always ESCALATES to the human gate.
+        if pa is not None and pb is not None and pa > pb and not has_exception:
+            win_label = policy.label(o.resolution_class or "") or o.resolution_class
+            lose_label = policy.label(p.resolution_class or "") or p.resolution_class
             resolutions.append(Resolution(
-                conflict=c, resolution_mode="AUTO_BY_POLICY", dropped_rule_id=loser.rule_id,
-                rationale=(f"{winner.resolution_class}({max(pa, pb)}) > {loser.resolution_class}"
-                           f"({min(pa, pb)}) under {policy.policy_id}@{policy.digest()[:12]}: "
+                conflict=c, resolution_mode="AUTO_BY_POLICY", dropped_rule_id=p.rule_id,
+                rationale=(f"{o.resolution_class}({pa}) > {p.resolution_class}"
+                           f"({pb}) under {policy.policy_id}@{policy.digest()[:12]}: "
                            f"{win_label} wins over {lose_label}"),
             ))
         else:
             resolutions.append(Resolution(
                 conflict=c, resolution_mode="ESCALATE", dropped_rule_id=None,
-                rationale="equal priority or an exception/override marker is present -> human gate",
+                rationale="equal/insufficient priority or an exception/override marker -> human gate",
             ))
     return resolutions
 

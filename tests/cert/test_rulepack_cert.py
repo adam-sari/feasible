@@ -69,8 +69,9 @@ def test_rulepack_records_conflict_resolution() -> None:
         severity=Severity.SOFT, clause_kind=ClauseKind.PERMISSION,
         compile_mode=CompileMode.CONFLICT_ONLY, resolution_class="CUSTOMER_PRIORITY",
         exception_mode=ExceptionMode.NONE,
-        provenance=Provenance(spans=[TextSpan(quoted_text="Filler-1 may do back-to-back changes",
-                                              role="primary_normative")]),
+        provenance=Provenance(spans=[TextSpan(
+            quoted_text="Filler-1 may perform back-to-back family changes without an intervening cleanout",
+            role="primary_normative")]),
     )
     ir = FCIR(rules=[*base.rules, perm], instance=base.instance)
     conflicts = detect_normative_conflicts(ir)

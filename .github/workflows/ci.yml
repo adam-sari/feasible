@@ -19,7 +19,7 @@ jobs:
         run: python -m pytest -q
       - name: Types
         run: python -m mypy feasible
-      - name: CLI smoke — certify + bundled verify (the demo must stay honest)
+      - name: CLI smoke — certify + authenticated bundled verify (the demo must stay honest)
         run: |
           python -m feasible.cli certify feasible/scenario/data --out plan_cert.json --rulepack-out rule_pack_cert.json
-          python -m feasible.cli verify plan_cert.json --rulepack rule_pack_cert.json
+          python -m feasible.cli verify plan_cert.json --rulepack rule_pack_cert.json --signer-key signer_pub.hex

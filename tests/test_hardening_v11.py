@@ -14,7 +14,11 @@ from feasible.cert.plan_cert import (
     rule_pack_digest,
     verify_plan_cert,
 )
-from feasible.cert.rulepack_cert import emit_rulepack_cert, verify_rulepack_cert
+from feasible.cert.rulepack_cert import (
+    bundle_binding_reasons,
+    emit_rulepack_cert,
+    verify_rulepack_cert,
+)
 from feasible.checker.checker import check
 from feasible.checker.plan_shape import validate_plan_shape
 from feasible.compile.cpsat import build_model
@@ -225,6 +229,75 @@ def test_policy_replay_catches_dropping_safety(certs) -> None:
     res = verify_rulepack_cert(bad, certs["key"].public_key())
     assert res.ok is False
     assert any("lower-priority" in r or "dropped" in r for r in res.reasons)
+
+
+def _resign_rulepack(cert: dict, key) -> dict:
+    body = {k: v for k, v in cert.items() if k != "signature"}
+    env = sign_dsse(body, key)
+    env["public_key_hex"] = public_key_hex(key)
+    cert["signature"] = env
+    return cert
+
+
+def test_replay_flags_override_marker_on_auto(certs) -> None:
+    # the real resolver ESCALATES when EITHER side carries a lex-specialis override.
+    # Replay must mirror that: an AUTO_BY_POLICY resolution over an overridden rule is illegal.
+    bad = copy.deepcopy(certs["rp"])
+    for r in bad["rules"]:
+        if r["rule_id"] == "R-4.4":
+            r["overrides"] = ["R-SETUP"]
+    ir_bad = FCIR(rules=[Rule.model_validate(r) for r in bad["rules"]],
+                  instance=certs["gov"].universe_ir.instance)
+    bad["rule_pack_digest"] = rule_pack_digest(ir_bad)  # keep the digest honest so ONLY replay can object
+    _resign_rulepack(bad, certs["key"])
+    res = verify_rulepack_cert(bad, certs["key"].public_key())
+    assert res.ok is False
+    assert any("exception/override" in r for r in res.reasons)
+
+
+def test_replay_rejects_unknown_resolution_mode(certs) -> None:
+    bad = copy.deepcopy(certs["rp"])
+    bad["conflict_status"]["resolutions"][0]["resolution_mode"] = "MAGIC"
+    _resign_rulepack(bad, certs["key"])
+    res = verify_rulepack_cert(bad, certs["key"].public_key())
+    assert res.ok is False
+    assert any("unknown resolution_mode" in r for r in res.reasons)
+
+
+def test_bundle_cross_checks_dropped(certs) -> None:
+    assert bundle_binding_reasons(certs["pc"], certs["rp"]) == []
+    # a Plan Cert that claims it dropped NOTHING while the rule-pack policy auto-dropped R-4.4
+    bad_pc = copy.deepcopy(certs["pc"])
+    bad_pc["active_rule_set_for_plan"]["dropped"] = []
+    reasons = bundle_binding_reasons(bad_pc, certs["rp"])
+    assert any("auto-dropped" in r for r in reasons)
+
+
+def _resign_plan(cert: dict, key) -> dict:
+    return _resign_rulepack(cert, key)  # identical envelope shape
+
+
+@pytest.mark.parametrize("group,leaf,bad_value,token", [
+    ("formalization", "n_hard_rules", 999, "n_hard_rules"),
+    ("formalization", "checked_rule_ids", ["R-BOGUS"], "checked_rule_ids"),
+    ("formalization", "structurally_enforced_rule_ids", [], "structurally_enforced_rule_ids"),
+])
+def test_plan_cert_rederives_formalization_leaves(certs, group, leaf, bad_value, token) -> None:
+    bad = copy.deepcopy(certs["pc"])
+    bad["claims"][group][leaf]["value"] = bad_value
+    _resign_plan(bad, certs["key"])
+    res = verify_plan_cert(bad, certs["key"].public_key())
+    assert res.ok is False
+    assert any(token in r for r in res.reasons)
+
+
+def test_plan_cert_rederives_active_rule_ids(certs) -> None:
+    bad = copy.deepcopy(certs["pc"])
+    bad["active_rule_set_for_plan"]["active_rule_ids"] = ["R-ONLY"]
+    _resign_plan(bad, certs["key"])
+    res = verify_plan_cert(bad, certs["key"].public_key())
+    assert res.ok is False
+    assert any("active_rule_ids" in r for r in res.reasons)
 
 
 # ---------------------------------------------------------------------------

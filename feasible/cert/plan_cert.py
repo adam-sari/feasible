@@ -1,12 +1,19 @@
 """The signed Plan Certificate + a solver-free ``verify`` + an HTML projection.
 
-The cert EMBEDS the instance and the active rule set, so ``verify_plan_cert`` is
-fully self-contained (no file I/O): it reconstructs the FCIR from the cert,
-re-runs the polynomial checker on the embedded plan, recomputes the objective,
-and re-derives the rule-pack / active-set digests — then verifies the signature
-and the embedded-key binding. Every claim leaf carries a ``provenance``
-discriminator drawn ONLY from the non-LLM set (the LLM never touches a plan
-cert's truth claims).
+The cert EMBEDS the instance, the active rule set, the plan, AND both incumbent
+plans, so ``verify_plan_cert`` is fully self-contained (no file I/O): it
+reconstructs the FCIR, re-runs the polynomial checker on the embedded plan,
+recomputes the objective, re-derives the ACTIVE-rule-set digest, the visible
+formalization claims, the instance_ref digest, the KPI table and the incumbent-A
+gotcha (from the embedded incumbents), then verifies the signature + embedded-key
+binding. The CP-SAT *optimality* leaves (``optimal_per_cpsat`` / ``gap_bps`` /
+``tripwire_passed``) are solver-REPORTED and are NOT re-checked by this solver-free
+verify — only the objective value itself is recomputed. The ``rule_pack_digest``
+is an OPAQUE universe token (NOT re-derivable from the embedded active rules, which
+are a subset of the universe); it — and the ``instance_ref`` — are bound to the
+Rule-Pack Cert by the bundled ``verify --rulepack``, never standalone. Every claim
+leaf carries a ``provenance`` discriminator drawn ONLY from the non-LLM set (the
+LLM never touches a plan cert's truth claims).
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ from feasible.canon.canonical import (
     verify_dsse,
 )
 from feasible.checker.checker import CheckResult, check
+from feasible.checker.plan_shape import validate_plan_shape
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
@@ -143,6 +151,10 @@ def emit_plan_cert(
         "instance": ir.instance.model_dump(mode="json"),
         "rules": [r.model_dump(mode="json") for r in ir.rules],
         "plan": plan.model_dump(mode="json"),
+        # incumbents embedded so verify can RE-DERIVE the KPI table + the gotcha,
+        # not merely trust the signed numbers:
+        "incumbent_a": incumbent_a.model_dump(mode="json"),
+        "incumbent_b": incumbent_b.model_dump(mode="json"),
         "claims": {
             "formalization": {
                 "rule_pack_digest_ref": _leaf(rpd, "rule_pack_digest_ref"),
@@ -173,9 +185,14 @@ def emit_plan_cert(
         "incumbent_A_failure": _incumbent_a_failure(ir, incumbent_a),
         "trust_boundary": {
             "verification": "IR-relative: the plan satisfies the approved IR; the source->IR edge "
-                            "is closed by the extraction-independence layer + human gate (Build B).",
+                            "is closed by the extraction-independence layer + human gate (Build B). "
+                            "Authenticity rests on the PINNED signer key (verify --signer-key); a rule's "
+                            "formalization metadata (clause_kind/compile_mode/severity) is the signer's "
+                            "human-gated attestation, not re-derivable from the SOP.",
             "optimality": "CP-SAT self-reported gap + a SAME-ENGINE tripwire; not independently proven "
-                          "(MiniZinc->Chuffed is the v1.1 upgrade).",
+                          "(MiniZinc->Chuffed is a post-v1.1 roadmap item). These optimality leaves are "
+                          "solver-reported and NOT re-checked by the solver-free `verify`; the objective "
+                          "value itself IS recomputed.",
             "shared_convention": "compiler and checker share only the canonical (start, stable_op_id) order.",
             "semantic_correlation_residual": "a misreading shared by extraction + reviewer + checker is "
                                              "not caught by v1.",
@@ -252,6 +269,56 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
     leaf = cert["claims"]["formalization"]["rule_pack_digest_ref"]["value"]
     if leaf != cert["rule_pack_ref"]["rule_pack_digest"]:
         reasons.append("rule_pack_digest_ref leaf != rule_pack_ref binding")
+
+    # 6) re-derive the visible formalization + active-set DISPLAY claims from the
+    # embedded active rules. The emitter computes these; re-deriving makes them
+    # machine-checked, not merely signed (a re-signed cert can't lie about them).
+    f = cert["claims"]["formalization"]
+    rederived = {
+        "n_hard_rules": len(active_rule_ids(ir)),
+        "checked_rule_ids": checked_rule_ids(ir),
+        "structurally_enforced_rule_ids": structurally_enforced_rule_ids(ir),
+        "rules_grounded_in_source": sum(
+            1 for r in ir.hard_plan_rules()
+            if any(getattr(s, "role", "") == "primary_normative" for s in r.provenance.spans)
+        ),
+    }
+    for name, want in rederived.items():
+        got = f.get(name, {}).get("value")
+        if got != want:
+            reasons.append(f"formalization.{name} claim {got} != re-derived {want}")
+    if cert["active_rule_set_for_plan"]["active_rule_ids"] != active_rule_ids(ir):
+        reasons.append("active_rule_ids claim != re-derived active set")
+
+    # 7) the embedded instance must hash to the cert's instance_ref (the cross-cert
+    # bundle binds THIS digest to the rule pack — so a plan can't be re-pointed at a
+    # different/easier instance under the same rule universe).
+    if digest_of(ir.instance.model_dump(mode="json")) != cert.get("instance_ref", {}).get("instance_digest"):
+        reasons.append("instance_ref digest mismatch")
+
+    # 8) re-derive the KPI table and the incumbent-A gotcha from the EMBEDDED incumbent
+    # plans — the headline "we beat the baseline" and the cited SOP clause are otherwise
+    # pure trust-me claims a re-signed cert could fabricate.
+    try:
+        inc_a = Plan.model_validate(cert["incumbent_a"])
+        inc_b = Plan.model_validate(cert["incumbent_b"])
+    except Exception as e:  # noqa: BLE001
+        reasons.append(f"incumbent reconstruction failed: {e}")
+        return VerifyResult(ok=False, reasons=reasons)
+    # the incumbents are real scenario plans, not strawmen: B (the KPI denominator) must be
+    # FEASIBLE + shape-valid, and A (the gotcha) must at least be shape-valid and exhibit a
+    # genuine hard-rule violation. (Their IDENTITY as the customer's true baselines is bound
+    # out-of-band by the scenario, exactly like the instance.)
+    if not check(inc_b, ir).passed:
+        reasons.append("incumbent_b is not a feasible baseline (the KPI denominator must be a real plan)")
+    if validate_plan_shape(inc_a, ir):
+        reasons.append("incumbent_a is not a well-formed plan over the certified instance")
+    if cert["incumbent_A_failure"].get("violated_rule_ref") is None:
+        reasons.append("incumbent_A_failure claims no violation (the gotcha must be a real hard-rule failure)")
+    if _kpi(ir, plan, inc_b) != cert["kpi_vs_incumbent_B"]:
+        reasons.append("kpi_vs_incumbent_B claim != re-derived KPI")
+    if _incumbent_a_failure(ir, inc_a) != cert["incumbent_A_failure"]:
+        reasons.append("incumbent_A_failure claim != re-derived failure")
 
     return VerifyResult(ok=len(reasons) == 0, reasons=reasons)
 
@@ -350,7 +417,7 @@ details{{margin-top:1rem}} pre{{background:#f6f6f6;padding:1rem;overflow:auto;fo
 
 <div class="claim gotcha"><b>🎯 Gotcha — incumbent A rejected:</b> violated <code>{inc_a.get('violated_rule_ref')}</code><br>
 cited SOP clause: <i>"{span_q}"</i><br>
-counter-witness: cleanout at minute {inc_a.get('counter_witness', {}).get('cleanout_start','?')} (minute-of-day {inc_a.get('counter_witness', {}).get('minute_of_day','?')} = night)</div>
+counter-witness: {', '.join(f'{k}={v}' for k, v in (inc_a.get('counter_witness') or {}).items()) or '—'}</div>
 
 <h3>KPI vs incumbent B (feasible-but-naive baseline)</h3>
 <table><tr><th>metric</th><th>Feasible</th><th>incumbent B</th></tr>

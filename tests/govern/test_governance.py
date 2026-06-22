@@ -23,6 +23,30 @@ from feasible.govern.pipeline import govern_pack
 from feasible.scenario import SHOP_RULES, build_extracted_pack, build_scenario_ir
 
 
+def test_classify_hard_operator_beats_soft_keyword() -> None:
+    # a HARD clause that merely MENTIONS 'priority'/'take precedence' must stay hard —
+    # the omission moat must not fail open on the soft-keyword pre-empt.
+    from feasible.ingest.segment import segment
+
+    for sop, expect in [
+        ("Priority allergen lines may not run unattended overnight under any circumstances.", "hard_prohibition"),
+        ("Cleanouts take precedence over throughput and must run for 90 minutes.", "hard_obligation"),
+        ("Priority-1 due dates are expected to be met where practical.", "soft_target"),  # no hard operator
+    ]:
+        segs = segment(sop)
+        assert classify(segs[0]) == expect, (sop, classify(segs[0]))
+
+
+def test_uncovered_hard_priority_clause_is_red() -> None:
+    # an UNCOVERED hard clause containing 'priority' must go RED (not silently soft/complete)
+    base = build_scenario_ir()
+    empty = FCIR(rules=[], instance=base.instance)
+    sop = "Priority allergen lines may not run unattended overnight under any circumstances."
+    ledger = build_coverage_ledger(sop, empty)
+    assert ledger.complete is False
+    assert any(e.category == "hard_prohibition" for e in ledger.red_findings)
+
+
 def test_coverage_complete_on_universe() -> None:
     # completeness is over the approved UNIVERSE (golden 6 + R-4.4 + corrected R-5.2)
     gov = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY)

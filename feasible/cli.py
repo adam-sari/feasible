@@ -6,11 +6,11 @@ from pathlib import Path
 
 import typer
 
-from feasible.canon.canonical import new_signing_key, public_key_from_hex
+from feasible.canon.canonical import new_signing_key, public_key_from_hex, public_key_hex
 from feasible.cert.plan_cert import emit_plan_cert, render_html, rule_pack_digest, verify_plan_cert
-from feasible.cert.rulepack_cert import emit_rulepack_cert, verify_rulepack_cert
+from feasible.cert.rulepack_cert import bundle_binding_reasons, emit_rulepack_cert, verify_rulepack_cert
 from feasible.checker.checker import check
-from feasible.conflict.policy import MANUFACTURING_POLICY
+from feasible.conflict.policy import DEFAULT_TRUSTED_POLICIES, MANUFACTURING_POLICY
 from feasible.govern.coverage import build_coverage_ledger
 from feasible.govern.pipeline import govern_pack
 from feasible.scenario import (
@@ -61,33 +61,58 @@ def run(
     typer.echo(f"wrote {out_path} and {html_path}")
 
 
+def _resolve_signer_key(signer_key: str) -> str:
+    """A --signer-key is either an inline 64-hex public key or a path to a .hex file."""
+    p = Path(signer_key)
+    return (p.read_text(encoding="utf-8").strip() if p.exists() else signer_key.strip())
+
+
 @app.command()
 def verify(
     cert_path: str = typer.Argument(..., help="a plan_cert.json to re-check offline"),
     rulepack: str = typer.Option(None, help="optional rule_pack_cert.json to also verify + bind"),
+    signer_key: str = typer.Option(
+        None, help="trusted signer public-key hex (or path to a .hex file) to AUTHENTICATE the "
+                   "cert; omit for self-described mode (re-checked but signer UNVERIFIED)"),
 ) -> None:
-    """Independently re-check a Plan Certificate (solver-free). With --rulepack, also
-    verify the Rule-Pack Cert and the universe-digest binding between the two."""
+    """Independently re-check a Plan Certificate (solver-free). With --rulepack, also verify
+    the Rule-Pack Cert and the cross-cert binding; the conflict policy is pinned to the
+    published trust store. With --signer-key, the cert is also AUTHENTICATED against a trusted
+    key (a re-signed forgery under any other key is rejected)."""
     cert = json.loads(Path(cert_path).read_text(encoding="utf-8"))
-    pubkey = public_key_from_hex(cert["signature"]["public_key_hex"])  # each cert self-binds its key
+    # pin to the supplied trusted key; otherwise fall back to the cert's self-described key
+    pinned_hex = _resolve_signer_key(signer_key) if signer_key else None
+    pubkey = public_key_from_hex(pinned_hex or cert["signature"]["public_key_hex"])
     res = verify_plan_cert(cert, pubkey)
     reasons = list(res.reasons)
     ok = res.ok
 
     if rulepack is not None:
         rp = json.loads(Path(rulepack).read_text(encoding="utf-8"))
-        rp_pubkey = public_key_from_hex(rp["signature"]["public_key_hex"])
-        rp_res = verify_rulepack_cert(rp, rp_pubkey)
+        rp_pubkey = public_key_from_hex(pinned_hex or rp["signature"]["public_key_hex"])
+        rp_res = verify_rulepack_cert(rp, rp_pubkey, trusted_policies=DEFAULT_TRUSTED_POLICIES)
         if not rp_res.ok:
             ok = False
             reasons += [f"rulepack: {r}" for r in rp_res.reasons]
-        if cert["rule_pack_ref"]["rule_pack_digest"] != rp["rule_pack_digest"]:
+        bundle = bundle_binding_reasons(cert, rp)  # digest + instance + active-set + rule-body + policy binding
+        if bundle:
             ok = False
-            reasons.append("rule_pack binding mismatch (plan cert <-> rule-pack cert)")
+            reasons += bundle
 
+    auth = "SIGNER AUTHENTICATED (pinned key)" if pinned_hex else \
+        "signer SELF-DESCRIBED — pass --signer-key to authenticate (re-check passed, identity UNVERIFIED)"
     if ok:
-        typer.echo("VERIFY: OK — signature valid, plan re-checked, objective + digests match"
-                   + (" + rule-pack bound." if rulepack is not None else "."))
+        if rulepack is not None:
+            typer.echo("VERIFY: OK — plan re-checked, objective + claims match + rule-pack bound "
+                       f"(active set, instance, SOP clauses, policy all pinned); {auth}.")
+        else:
+            # the active-set→universe and clause→SOP bindings live in the rule-pack cert by
+            # design (the plan cert's rule_pack_digest is an opaque token), so a bare plan-cert
+            # verify CANNOT confirm a hard rule wasn't dropped or a clause reworded.
+            typer.echo("VERIFY: OK — plan internally consistent (objective + KPI + gotcha re-derived); "
+                       "but WITHOUT --rulepack the active rule set is NOT bound to a certified universe "
+                       "and cited SOP clauses are UNVERIFIED — pass --rulepack to confirm no hard rule "
+                       f"was dropped or reworded; {auth}.")
         raise typer.Exit(0)
     typer.echo("VERIFY: FAIL")
     for r in reasons:
@@ -145,11 +170,15 @@ def certify(
                                dropped=dropped, rule_pack_digest_override=universe_digest)
     Path(out).write_text(json.dumps(plan_cert, indent=2), encoding="utf-8")
     Path(out).with_suffix(".html").write_text(render_html(plan_cert), encoding="utf-8")
+    # publish the signer's PUBLIC key so an auditor can pin it: `verify --signer-key signer_pub.hex`
+    signer_path = Path(out).with_name("signer_pub.hex")
+    signer_path.write_text(public_key_hex(key), encoding="utf-8")
 
-    # 4) verify both + the digest binding
-    rp_ok = verify_rulepack_cert(rp_cert, key.public_key())
+    # 4) verify both (policy pinned to the published trust store) + the cross-cert binding
+    rp_ok = verify_rulepack_cert(rp_cert, key.public_key(), trusted_policies=DEFAULT_TRUSTED_POLICIES)
     pl_ok = verify_plan_cert(plan_cert, key.public_key())
-    bound = plan_cert["rule_pack_ref"]["rule_pack_digest"] == rp_cert["rule_pack_digest"] == universe_digest
+    bundle = bundle_binding_reasons(plan_cert, rp_cert)  # digest + instance + active-set + rule-body + policy
+    bound = not bundle and plan_cert["rule_pack_ref"]["rule_pack_digest"] == universe_digest
 
     typer.echo(f"plan: status={result.status} objective(wt,co)={result.objective} checker={'PASS' if chk.passed else 'FAIL'}")
     typer.echo("KPI vs incumbent B:")
@@ -160,7 +189,9 @@ def certify(
     typer.echo(f"GOTCHA — incumbent A violates {fa['violated_rule_ref']}: \"{fa['span']['quoted_text']}\"")
     typer.echo(f"Rule-Pack Cert verify: {'OK' if rp_ok.ok else 'FAIL ' + str(rp_ok.reasons)}")
     typer.echo(f"Plan Cert verify     : {'OK' if pl_ok.ok else 'FAIL ' + str(pl_ok.reasons)}")
-    typer.echo(f"two-cert digest binding: {'OK' if bound else 'MISMATCH'}")
+    typer.echo(f"two-cert digest binding: {'OK' if bound else 'MISMATCH ' + str(bundle)}")
+    typer.echo(f"signer public key -> {signer_path} ({public_key_hex(key)[:16]}…)  "
+               f"(auditor: verify --signer-key {signer_path.name})")
     typer.echo(f"wrote {rulepack_out}, {out}, {Path(out).with_suffix('.html')}")
     if not (rp_ok.ok and pl_ok.ok and bound and chk.passed):
         raise typer.Exit(1)

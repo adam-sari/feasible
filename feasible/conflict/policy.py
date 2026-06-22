@@ -51,3 +51,11 @@ MANUFACTURING_POLICY = ConflictPolicy(
         ClassPriority(class_id="EFFICIENCY", human_label="Efficiency objective", priority=10),
     ],
 )
+
+# The published trust store: the (policy_id, digest) pairs a verifier will accept as an
+# authority for conflict resolution. A re-signed cert that embeds an INVERTED policy (e.g.
+# customer > safety) is rejected here at the root — the priority lattice that decides which
+# rule may be dropped is pinned to a published policy, never re-derivable from cert bytes.
+DEFAULT_TRUSTED_POLICIES: frozenset[tuple[str, str]] = frozenset(
+    {(MANUFACTURING_POLICY.policy_id, MANUFACTURING_POLICY.digest())}
+)

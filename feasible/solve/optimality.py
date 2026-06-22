@@ -5,7 +5,7 @@ objective ``V = (weighted_tardiness, total_changeover)`` (lexicographic), with n
 objective. INFEASIBLE => nothing beats V => the headline optimum is corroborated.
 Labelled honestly as a SAME-ENGINE tripwire (it defends optimal-but-wrong /
 wrong-bound, not the false-INFEASIBLE class); the genuinely independent backing
-(a different solver) is a v1.1 upgrade.
+(a different solver) is a post-v1.1 roadmap item.
 """
 from __future__ import annotations
 
