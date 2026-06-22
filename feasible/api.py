@@ -47,10 +47,8 @@ from feasible.domains.base import (
     TrustVector,
     VerifyView,
 )
-from feasible.govern.pipeline import govern_pack
 from feasible.ir.domain import FCIR, Plan
 from feasible.smt.attest import attest_feasibility
-from feasible.solve.orchestrate import solve
 
 # The registered scenarios surfaced by the facade. Manufacturing only for Spec 0;
 # the datacenter track appends its id here when it forks against this seam.
@@ -70,8 +68,12 @@ def _resolve(domain_id: str) -> tuple[Domain, DomainVerifier]:
 
 
 def _govern(domain: Domain):
-    """Run the §5.2/§4.4 governance pipeline over the domain's extracted pack."""
-    return govern_pack(domain.build_extracted_pack(), domain.policy())
+    """Run the §5.2/§4.4 governance pipeline over the domain's extracted pack
+    through the per-domain ``Domain.govern`` seam (branch-free; a second domain
+    governs through the SAME frozen pipeline). Manufacturing's ``govern``
+    delegates to ``govern_pack(build_extracted_pack(), policy())`` →
+    byte-identical."""
+    return domain.govern()
 
 
 def list_scenarios() -> list[ScenarioInfo]:
@@ -149,7 +151,11 @@ def certify(domain_id: str, *, signer_key: Ed25519PrivateKey | None = None) -> C
     rp_cert = emit_rulepack_cert(
         universe_ir, domain.policy_doc(), domain.policy(), gov.resolutions, key)
 
-    result = solve(active_ir, max_seconds=30.0)
+    # branch-free solve through the per-domain seam: a second domain plugs its own
+    # solve (which sets its real objective) behind THIS seam without certify
+    # branching on domain_id. Manufacturing's ``solve`` delegates to
+    # ``orchestrate.solve(ir, max_seconds=30.0)`` → byte-identical.
+    result = domain.solve(active_ir)
     if result.plan is None:
         raise RuntimeError(f"solve produced no plan for {domain_id!r}: status={result.status}")
     plan: Plan = result.plan

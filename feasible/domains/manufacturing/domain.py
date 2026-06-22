@@ -14,7 +14,12 @@ data methods wired to the real builders.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from feasible.govern.pipeline import GovernResult
+    from feasible.ir.domain import FCIR
+    from feasible.solve.orchestrate import SolveResult
 
 
 class ManufacturingDomain:
@@ -74,6 +79,29 @@ class ManufacturingDomain:
         from feasible.conflict.policy import MANUFACTURING_POLICY
 
         return MANUFACTURING_POLICY
+
+    def govern(self) -> GovernResult:
+        """Run the §5.2/§4.4 governance pipeline over the extracted pack.
+
+        Delegates VERBATIM to ``govern_pack(self.build_extracted_pack(),
+        self.policy())`` — the exact call ``api.certify`` inlined before the
+        seam, so the governed surface (universe/active digests, dropped ids) is
+        byte-identical. Lazy import to avoid a govern<->domain import cycle."""
+        from feasible.govern.pipeline import govern_pack
+
+        return govern_pack(self.build_extracted_pack(), self.policy())
+
+    def solve(self, ir: FCIR) -> SolveResult:  # noqa: A003  (the seam verb)
+        """Solve the active set ``ir`` for the certified plan.
+
+        Delegates to ``feasible.solve.orchestrate.solve`` with the same
+        ``max_seconds=30.0`` budget ``api.certify`` used before the seam → the
+        manufacturing solve path is byte-identical (the oracle's
+        deterministic-surface projection is unchanged). Lazy import to avoid a
+        solve<->domain import cycle."""
+        from feasible.solve.orchestrate import solve
+
+        return solve(ir, max_seconds=30.0)
 
     def viz_meta(self) -> dict[str, Any]:
         """Presentation metadata for the timeline view (machine lanes)."""

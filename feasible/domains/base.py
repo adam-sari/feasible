@@ -15,9 +15,16 @@ land in later Spec-0 tasks; this is the seam every track forks against.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypedDict, runtime_checkable
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:  # avoid a base<->solve/govern import cycle (these modules
+    # transitively import this one via the manufacturing registration side-effect);
+    # the seam annotations are strings under ``from __future__ import annotations``.
+    from feasible.govern.pipeline import GovernResult
+    from feasible.ir.domain import FCIR
+    from feasible.solve.orchestrate import SolveResult
 
 # --------------------------------------------------------------------------- #
 # Witness-schema registry (typed counter-witnesses, fail-closed)              #
@@ -161,6 +168,26 @@ class Domain(Protocol):
     def policy(self) -> Any: ...
     def viz_meta(self) -> Any: ...
     def trust_boundary_extra(self) -> Any: ...
+
+    def govern(self) -> GovernResult:
+        """Run the §5.2/§4.4 governance pipeline over THIS domain's extracted pack.
+
+        The branch-free seam ``api.certify`` calls instead of inlining
+        ``govern_pack(domain.build_extracted_pack(), domain.policy())`` — so a
+        second domain governs through the SAME frozen pipeline behind one seam.
+        Manufacturing delegates to exactly that call → byte-identical."""
+        ...
+
+    def solve(self, ir: FCIR) -> SolveResult:  # noqa: A003  (the seam verb)
+        """Produce the certified ``SolveResult`` for ``ir`` (the active set).
+
+        The branch-free seam ``api.certify`` calls instead of the module-level
+        ``feasible.solve.orchestrate.solve`` — so a second domain plugs its own
+        ``dc_solve`` (which sets the real domain objective consumed by
+        ``verifier.objective``) behind the SAME seam without ``certify``
+        branching on ``domain_id``. Manufacturing delegates to
+        ``orchestrate.solve`` → byte-identical."""
+        ...
 
 
 # --------------------------------------------------------------------------- #
