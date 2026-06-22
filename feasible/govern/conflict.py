@@ -11,10 +11,11 @@ lower-priority clause, ``AUTO_BY_POLICY``); otherwise it ESCALATES to the gate.
 """
 from __future__ import annotations
 
-import z3
 from pydantic import BaseModel, Field
 
+import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
 from feasible.conflict.policy import ConflictPolicy
+from feasible.domains import get_domain
 from feasible.ir.domain import ClauseKind, ExceptionMode, FCIR, Rule
 
 
@@ -33,37 +34,23 @@ class Resolution(BaseModel):
     rationale: str = ""
 
 
-def _normative_unsat(obligation_id: str, permission_id: str) -> list[str] | None:
-    """Z3: obligation says cleanout_required, permission says NOT — jointly UNSAT."""
-    s = z3.Solver()
-    s.set(unsat_core=True)
-    required = z3.Bool("cleanout_required_over_scope_S")
-    s.assert_and_track(required, obligation_id)  # obligation: required
-    s.assert_and_track(z3.Not(required), permission_id)  # permission: not required
-    if s.check() == z3.unsat:
-        return [str(c) for c in s.unsat_core()]
-    return None
+def _normative_unsat(
+    obligation_id: str, permission_id: str, domain_id: str = "manufacturing"
+) -> list[str] | None:
+    """The rule-vs-rule Z3 UNSAT core, now a per-domain hook
+    (``DomainVerifier.conflict_unsat_core``). ``detect_normative_conflicts``
+    threads the IR's signed ``domain_id``; the rule-only default keeps the
+    manufacturing surface unchanged."""
+    _, verifier = get_domain(domain_id)
+    return verifier.conflict_unsat_core(obligation_id, permission_id)
 
 
 def _scope_realizable(ir: FCIR, permission: Rule) -> bool:
-    """Does the instance realize the permission's scope (machine + priority + a
-    real Allergen->non-allergen transition)?"""
-    machine = permission.params.get("scope_machine")
-    priority = permission.params.get("scope_priority")
-    inst = ir.instance
-    # is there a priority-`priority` job whose fill op can run on `machine` and is
-    # Allergen, plus a non-allergen job that can follow it there?
-    allergen_here = [
-        o for o in inst.operations
-        if machine in o.eligible_machines
-        and inst.job(o.job_id).family == "Allergen"
-        and (priority is None or inst.job(o.job_id).priority == priority)
-    ]
-    nonallergen_here = [
-        o for o in inst.operations
-        if machine in o.eligible_machines and inst.job(o.job_id).family != "Allergen"
-    ]
-    return bool(allergen_here) and bool(nonallergen_here)
+    """Scope realizability, now a per-domain hook
+    (``DomainVerifier.conflict_realizable``) dispatched on the IR's signed
+    ``domain_id`` (fail-closed on an unknown domain)."""
+    _, verifier = get_domain(ir.domain_id)
+    return verifier.conflict_realizable(ir, permission)
 
 
 def detect_normative_conflicts(ir: FCIR) -> list[Conflict]:
@@ -76,7 +63,7 @@ def detect_normative_conflicts(ir: FCIR) -> list[Conflict]:
             continue
         if not _scope_realizable(ir, p):
             continue
-        core = _normative_unsat(obligation.rule_id, p.rule_id)
+        core = _normative_unsat(obligation.rule_id, p.rule_id, ir.domain_id)
         if core is not None:
             conflicts.append(Conflict(
                 obligation_id=obligation.rule_id,

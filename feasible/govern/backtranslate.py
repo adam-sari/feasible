@@ -9,7 +9,9 @@ LLM/entailment check.)
 """
 from __future__ import annotations
 
-from feasible.ir.domain import ClauseKind, Rule
+import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
+from feasible.domains import get_domain
+from feasible.ir.domain import ClauseKind, FCIR, Rule
 
 _DEONTIC = {
     ClauseKind.OBLIGATION: "must",
@@ -18,31 +20,20 @@ _DEONTIC = {
     ClauseKind.EXCEPTION_CANDIDATE: "may, by exception,",
 }
 
-_RENDER = {
-    "routing_precedence": "operations of a job must run in Mix -> Fill -> Label order",
-    "no_overlap": "a machine must not run two operations at once",
-    "setup_cleanout": "a 90-minute cleanout must be performed when switching from an allergen product",
-    "maintenance": "Filler-2 must not run during its Tuesday maintenance window",
-    "shift": "the plant operates a day and a night shift",
-    "night_cleanout": "a cleanout must not be performed during the night shift",
-    "non_preemption": None,  # scope-dependent, see below
-    "permission": "Filler-1 may change product family without a cleanout",
-}
-
 
 def deontic_operator(clause_kind: ClauseKind) -> str:
     return _DEONTIC[clause_kind]
 
 
-def back_translate(rule: Rule) -> str:
-    if rule.kind == "non_preemption":
-        scope = rule.params.get("scope", "fill_op")
-        if scope == "whole_line":
-            return ("once an allergen order starts, NO other order may use ANY machine on its "
-                    "route until it finishes (whole-line lock)")
-        return "an allergen order's fill operation must run to completion without interruption"
-    body = _RENDER.get(rule.kind) or f"rule {rule.rule_id}"
-    return body
+def back_translate(rule: Rule, ir: FCIR | None = None) -> str:
+    """Render a rule to NL via the domain renderer (relocated behind the seam).
+
+    The renderer is per-domain: when ``ir`` is given the domain is selected by its
+    signed ``domain_id``; without it (the rule-only callers / tests) we default to
+    the manufacturing renderer, the only registered domain on this surface."""
+    domain_id = ir.domain_id if ir is not None else "manufacturing"
+    _, verifier = get_domain(domain_id)
+    return verifier.back_translate(rule)
 
 
 def polarity_matches_source(rule: Rule) -> bool:

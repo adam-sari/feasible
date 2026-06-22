@@ -16,11 +16,25 @@ from typing import Any
 import z3
 
 from feasible.checker.result import Violation
-from feasible.ir.domain import CellRef, FCIR, OpClass, Plan, TextSpan
+from feasible.ingest.segment import Segment
+from feasible.ir.domain import CellRef, ClauseKind, FCIR, OpClass, Plan, Rule, TextSpan
 
 # The day-shift window default for the night-cleanout rule (relocated from
 # checker.py; kept identical so the predicate is byte-for-byte the same).
 DAY_DEFAULT = {"day_start": 0, "day_end": 960, "night_start": 960, "night_end": 1440}
+
+# Manufacturing natural-language renderer (relocated verbatim from
+# govern/backtranslate.py ``_RENDER``; ``back_translate`` is now a per-domain hook).
+_RENDER = {
+    "routing_precedence": "operations of a job must run in Mix -> Fill -> Label order",
+    "no_overlap": "a machine must not run two operations at once",
+    "setup_cleanout": "a 90-minute cleanout must be performed when switching from an allergen product",
+    "maintenance": "Filler-2 must not run during its Tuesday maintenance window",
+    "shift": "the plant operates a day and a night shift",
+    "night_cleanout": "a cleanout must not be performed during the night shift",
+    "non_preemption": None,  # scope-dependent, see below
+    "permission": "Filler-1 may change product family without a cleanout",
+}
 
 
 def rule_span(ir: FCIR, rule_id: str) -> TextSpan | CellRef | None:
@@ -307,14 +321,69 @@ class ManufacturingVerifier:
     def gotcha_rule_id(self) -> str | None:
         raise NotImplementedError("manufacturing gotcha_rule_id() is relocated in a later task")
 
-    def classify_segment(self, seg: Any) -> str:
-        raise NotImplementedError("manufacturing classify_segment() is relocated in a later task")
+    def classify_segment(self, seg: Segment) -> str:
+        """The deterministic keyword normativity classifier (relocated verbatim
+        from ``govern/coverage.classify``). A HARD deontic operator ALWAYS wins
+        over the soft-target keywords (the omission moat must not fail open)."""
+        text = seg.text.strip().lower()
+        if seg.text.lstrip().startswith("#"):
+            return "metadata"
+        if not text:
+            return "boilerplate"
+        prohibition = any(k in text for k in ["may only", "may not", "does not", "not work", "unavailable", "no filler"])
+        obligation = any(k in text for k in ["is required", "must ", "shall"])
+        conditional = "when" in text or "if " in text
+        if prohibition:
+            return "hard_prohibition"
+        if obligation and conditional:
+            return "conditional_obligation"
+        if obligation:
+            return "hard_obligation"
+        if "take precedence" in text or "are expected" in text or "priority" in text:
+            return "soft_target"
+        return "boilerplate"
 
-    def back_translate(self, rule: Any) -> str:
-        raise NotImplementedError("manufacturing back_translate() is relocated in a later task")
+    def back_translate(self, rule: Rule) -> str:
+        """The manufacturing NL renderer (relocated verbatim from
+        ``govern/backtranslate.back_translate``)."""
+        if rule.kind == "non_preemption":
+            scope = rule.params.get("scope", "fill_op")
+            if scope == "whole_line":
+                return ("once an allergen order starts, NO other order may use ANY machine on its "
+                        "route until it finishes (whole-line lock)")
+            return "an allergen order's fill operation must run to completion without interruption"
+        body = _RENDER.get(rule.kind) or f"rule {rule.rule_id}"
+        return body
 
-    def conflict_realizable(self, ir: Any, permission: Any) -> bool:
-        raise NotImplementedError("manufacturing conflict_realizable() is relocated in a later task")
+    def conflict_realizable(self, ir: FCIR, permission: Rule) -> bool:
+        """Allergen-transition realizability (relocated verbatim from
+        ``govern/conflict._scope_realizable``): does the instance realize the
+        permission's scope (machine + priority + a real Allergen->non-allergen
+        transition)?"""
+        machine = permission.params.get("scope_machine")
+        priority = permission.params.get("scope_priority")
+        inst = ir.instance
+        allergen_here = [
+            o for o in inst.operations
+            if machine in o.eligible_machines
+            and inst.job(o.job_id).family == "Allergen"
+            and (priority is None or inst.job(o.job_id).priority == priority)
+        ]
+        nonallergen_here = [
+            o for o in inst.operations
+            if machine in o.eligible_machines and inst.job(o.job_id).family != "Allergen"
+        ]
+        return bool(allergen_here) and bool(nonallergen_here)
 
     def conflict_unsat_core(self, obligation_id: str, permission_id: str) -> list[str] | None:
-        raise NotImplementedError("manufacturing conflict_unsat_core() is relocated in a later task")
+        """The rule-vs-rule Z3 UNSAT core (relocated verbatim from
+        ``govern/conflict._normative_unsat``): obligation says cleanout_required,
+        permission says NOT — jointly UNSAT."""
+        s = z3.Solver()
+        s.set(unsat_core=True)
+        required = z3.Bool("cleanout_required_over_scope_S")
+        s.assert_and_track(required, obligation_id)  # obligation: required
+        s.assert_and_track(z3.Not(required), permission_id)  # permission: not required
+        if s.check() == z3.unsat:
+            return [str(c) for c in s.unsat_core()]
+        return None

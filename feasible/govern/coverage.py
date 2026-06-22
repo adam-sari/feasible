@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
+from feasible.domains import get_domain
 from feasible.ingest.segment import Segment, segment
 from feasible.ir.domain import FCIR, TextSpan
 
@@ -28,30 +30,14 @@ TAXONOMY = [
 NORMATIVE_RED = {"hard_prohibition", "hard_obligation", "conditional_obligation"}
 
 
-def classify(seg: Segment) -> str:
-    text = seg.text.strip().lower()
-    if seg.text.lstrip().startswith("#"):
-        return "metadata"
-    if not text:
-        return "boilerplate"
-    # A HARD deontic operator ALWAYS wins over the soft-target keywords: a clause that
-    # both mentions 'priority' AND says 'may not' / 'must' is a hard rule, never a soft
-    # target. Testing the soft keywords first (as a pre-empt) would let any hard clause
-    # containing the word 'priority' slip through uncovered without going RED — the
-    # omission moat must not fail open.
-    prohibition = any(k in text for k in ["may only", "may not", "does not", "not work", "unavailable", "no filler"])
-    obligation = any(k in text for k in ["is required", "must ", "shall"])
-    conditional = "when" in text or "if " in text
-    if prohibition:
-        return "hard_prohibition"
-    if obligation and conditional:
-        return "conditional_obligation"
-    if obligation:
-        return "hard_obligation"
-    # only with NO hard operator present are priority/precedence/expectation soft (§3.1/§3.4)
-    if "take precedence" in text or "are expected" in text or "priority" in text:
-        return "soft_target"
-    return "boilerplate"
+def classify(seg: Segment, domain_id: str = "manufacturing") -> str:
+    """Classify a segment via the domain's normativity taxonomy. The keyword
+    heuristic itself now lives behind the ``DomainVerifier`` seam
+    (``classify_segment``); this is a thin back-compat shim that defaults to the
+    manufacturing classifier. ``build_coverage_ledger`` dispatches on the IR's
+    signed ``domain_id`` directly."""
+    _, verifier = get_domain(domain_id)
+    return verifier.classify_segment(seg)
 
 
 class CoverageEntry(BaseModel):
@@ -84,13 +70,14 @@ def _rule_spans(ir: FCIR) -> list[tuple[str, TextSpan]]:
 
 
 def build_coverage_ledger(sop_text: str, ir: FCIR) -> CoverageLedger:
+    _, verifier = get_domain(ir.domain_id)  # fail-closed on an unknown domain
     segments = segment(sop_text)
     spans = _rule_spans(ir)
     entries: list[CoverageEntry] = []
     reds: list[CoverageEntry] = []
     denom = 0
     for seg in segments:
-        category = classify(seg)
+        category = verifier.classify_segment(seg)
         covered_by = [
             rid for (rid, s) in spans if _overlaps(seg.char_start, seg.char_end, s.char_start, s.char_end)
         ]
