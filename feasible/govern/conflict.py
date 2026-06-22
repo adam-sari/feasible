@@ -113,4 +113,4 @@ def active_after_resolution(ir: FCIR, resolutions: list[Resolution]) -> FCIR:
     rejected-from-pack)."""
     dropped = {r.dropped_rule_id for r in resolutions if r.resolution_mode == "AUTO_BY_POLICY"}
     kept = [r for r in ir.rules if r.rule_id not in dropped]
-    return FCIR(rules=kept, instance=ir.instance)
+    return FCIR(rules=kept, instance=ir.instance, domain_id=ir.domain_id)

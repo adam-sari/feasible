@@ -43,7 +43,9 @@ def govern_pack(extracted: FCIR, policy: ConflictPolicy) -> GovernResult:
             corrected_rules.append(fixed)
         else:
             corrected_rules.append(r)
-    corrected = FCIR(rules=corrected_rules, instance=extracted.instance)
+    corrected = FCIR(
+        rules=corrected_rules, instance=extracted.instance, domain_id=extracted.domain_id
+    )
 
     # 2) §4.4 — detect the deontic clash and resolve via the signed policy
     conflicts = detect_normative_conflicts(corrected)
