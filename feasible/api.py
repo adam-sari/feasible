@@ -34,7 +34,6 @@ from feasible.cert.rulepack_cert import (
     verify_rulepack_cert,
 )
 from feasible.checker.checker import check
-from feasible.conflict.policy import DEFAULT_TRUSTED_POLICIES
 from feasible.domains import get_domain
 from feasible.domains.base import (
     CertifyResult,
@@ -226,8 +225,12 @@ def _trust_vector(
     (manufacturing: real data, calibrated coverage, verified conflict replay — its
     ``trust_boundary_extra`` is empty)."""
     pl_ok = verify_plan_cert(plan_cert, public_key).ok
+    # trusted_policies=None => verify_rulepack_cert resolves the LIVE trusted_policy_set()
+    # per call (re-scans the registered domains), so a domain registered AFTER this module
+    # was imported is admitted. With only manufacturing registered the live set equals the
+    # import-time snapshot -> byte-identical for the manufacturing path.
     rp_ok = verify_rulepack_cert(
-        rule_pack_cert, public_key, trusted_policies=DEFAULT_TRUSTED_POLICIES).ok
+        rule_pack_cert, public_key, trusted_policies=None).ok
     bound = not bundle_binding_reasons(plan_cert, rule_pack_cert)
     checker = "pass" if (pl_ok and rp_ok and bound) else "fail"
     extra = domain.trust_boundary_extra()
@@ -263,8 +266,11 @@ def verify(
 
     if rule_pack_cert is not None:
         rp_pubkey = _public_key_for(rule_pack_cert, signer_hex)
+        # trusted_policies=None => the LIVE trusted_policy_set() is resolved per call (a
+        # later-registered domain's safety-preserving policy is admitted, regardless of
+        # import order); equals the snapshot when only manufacturing is registered.
         rp_res = verify_rulepack_cert(
-            rule_pack_cert, rp_pubkey, trusted_policies=DEFAULT_TRUSTED_POLICIES)
+            rule_pack_cert, rp_pubkey, trusted_policies=None)
         if not rp_res.ok:
             ok = False
             reasons += [f"rulepack: {r}" for r in rp_res.reasons]
