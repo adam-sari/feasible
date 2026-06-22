@@ -44,16 +44,25 @@ class ManufacturingDomain:
     def incumbents(self) -> dict[str, Any]:
         """The two baselines: A (illegal night cleanout) and B (feasible-naive).
 
-        Built off the golden IR's active surface so the incumbents match the
-        plan-certified instance (identical to the Task-1 oracle construction)."""
+        Seeded from the GOVERNED active IR (the corrected-universe-minus-AUTO-drops
+        surface produced by ``govern_pack``), so the incumbents are built against
+        the same constraint set as the plan-certified instance — identical to the
+        Task-1 oracle construction (``tests/regression/test_manufacturing_oracle.py``,
+        which seeds ``generate_incumbent_b``/``make_incumbent_a`` off ``gov.active_ir``).
+        Using ``build_scenario_ir`` (the 6-rule golden IR) here would compile a
+        DIFFERENT constraint set — it omits the HARD ``R-5.2`` non_preemption obligation
+        that the gate corrects-and-retains — so ``incumbent_b`` could diverge from the
+        certified surface; the governed active IR is the load-bearing seed."""
+        from feasible.conflict.policy import MANUFACTURING_POLICY
+        from feasible.govern.pipeline import govern_pack
         from feasible.scenario import (
-            build_scenario_ir,
+            build_extracted_pack,
             generate_incumbent_b,
             make_incumbent_a,
         )
 
-        ir = build_scenario_ir()
-        inc_b = generate_incumbent_b(ir)
+        active_ir = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY).active_ir
+        inc_b = generate_incumbent_b(active_ir)
         inc_a = make_incumbent_a(inc_b)
         return {"A": inc_a, "B": inc_b}
 
