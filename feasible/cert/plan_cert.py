@@ -35,7 +35,7 @@ from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
-from feasible.solve.orchestrate import SolveResult, recompute_objective
+from feasible.solve.orchestrate import SolveResult
 from feasible.smt.attest import AttestResult
 
 SCHEMA_VERSION = "feasible.plan_cert.v1"
@@ -315,8 +315,12 @@ def verify_plan_cert(cert: dict, public_key: Ed25519PublicKey) -> VerifyResult:
     if not chk.passed:
         reasons.append("checker FAIL on the embedded plan: " + "; ".join(v.message for v in chk.violations))
 
-    # 4) recompute the canonical objective and match the cert's claim
-    recomputed = list(recompute_objective(ir, plan))
+    # 4) recompute the canonical objective and match the cert's claim. Routed
+    # through the per-domain SEAM (``verifier`` already resolved at the domain
+    # guard above): ``ManufacturingVerifier.objective`` delegates to
+    # ``recompute_objective`` → byte-identical, while a SECOND domain recomputes
+    # ITS own objective behind the same seam.
+    recomputed = list(verifier.objective(ir, plan))
     claimed = cert["claims"]["optimality"]["objective"]["value"]
     if recomputed != list(claimed):
         reasons.append(f"objective mismatch: recomputed {recomputed} != cert {claimed}")
