@@ -90,3 +90,67 @@ def load_env() -> str | None:
         return os.environ.get("GEMINI_API_KEY") or None
     load_dotenv(override=False)
     return os.environ.get("GEMINI_API_KEY") or None
+
+
+class MissingApiKeyError(RuntimeError):
+    """Live recording was requested but GEMINI_API_KEY is not set."""
+
+
+class GeminiProvider:
+    """Live google-genai drafting. The SDK is imported LAZILY (the offline default
+    never needs it). With ``record=True`` (the only mode the CLI uses for live) the
+    reply is written to the fixture store for deterministic offline replay."""
+
+    def __init__(self, api_key: str, fixtures_dir: Path, *, record: bool = True) -> None:
+        from google import genai  # lazy: offline path never imports the SDK
+
+        self.fixtures_dir = Path(fixtures_dir)
+        self.record = record
+        self._client = genai.Client(api_key=api_key)
+
+    def draft(self, *, prompt: str, response_schema: dict, fixture_key: str) -> dict:
+        from google.genai import types
+
+        from feasible.extract.schema import RuleDraft  # lazy: the SDK introspects this CLASS
+
+        # C-3: pass the RuleDraft Pydantic CLASS (the SDK builds the closed wire schema
+        # from it) — NOT the volatile RuleDraft.model_json_schema() dict, and NOT the
+        # `response_schema` arg (which keys only the offline fixture, hashed elsewhere).
+        resp = self._client.models.generate_content(
+            model=MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=RuleDraft,
+                temperature=TEMPERATURE,
+                seed=SEED,
+            ),
+        )
+        text = resp.text
+        if text is None:
+            raise RuntimeError(
+                "Gemini returned an empty response (no JSON text) — likely a blocked "
+                "or truncated reply; cannot draft a rule for this span"
+            )
+        out = json.loads(text)
+        if self.record:
+            self.fixtures_dir.mkdir(parents=True, exist_ok=True)
+            (self.fixtures_dir / f"{fixture_key}.json").write_text(
+                json.dumps(out, indent=2), encoding="utf-8"
+            )
+        return out
+
+
+def make_provider(*, record: bool, fixtures_dir: Path) -> Provider:
+    """The CLI's provider factory. Default (record=False) is the offline
+    ``FixtureProvider``. Live recording (record=True) fails FAST when no key is
+    present (no silent self-described drafting)."""
+    if not record:
+        return FixtureProvider(fixtures_dir)
+    api_key = load_env()
+    if not api_key:
+        raise MissingApiKeyError(
+            "live --record needs GEMINI_API_KEY (set it in .env, see .env.example); "
+            "omit --record to replay recorded fixtures offline"
+        )
+    return GeminiProvider(api_key, fixtures_dir, record=True)

@@ -73,3 +73,47 @@ def test_load_env_returns_none_when_unset(monkeypatch, tmp_path):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)            # empty dir, no .env
     assert load_env() is None
+
+
+from feasible.extract.provider import (
+    GeminiProvider,
+    MissingApiKeyError,
+    make_provider,
+)
+
+
+def test_make_provider_default_is_offline_fixture(monkeypatch, tmp_path):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    prov = make_provider(record=False, fixtures_dir=tmp_path)
+    assert isinstance(prov, FixtureProvider)            # default = offline replay
+
+
+def test_make_provider_record_without_key_fails_fast(monkeypatch, tmp_path):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # ensure no .env leaks a key into this test
+    monkeypatch.setattr("feasible.extract.provider.load_env", lambda: None)
+    with pytest.raises(MissingApiKeyError):
+        make_provider(record=True, fixtures_dir=tmp_path)
+
+
+def test_gemini_provider_records_fixture(monkeypatch, tmp_path):
+    """With record=True the provider writes the reply to the fixture store. We stub
+    the SDK client so this runs offline (the recording path is what we assert)."""
+    class _FakeResp:
+        text = json.dumps({"rule_id": "C-LIVE", "kind": "x", "clause_kind": "OBLIGATION",
+                           "severity": "HARD", "verbatim_quote": "q", "params_json": "",
+                           "rationale": ""})
+
+    class _FakeModels:
+        def generate_content(self, **kwargs):
+            return _FakeResp()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    prov = GeminiProvider("FAKE_KEY", tmp_path, record=True)
+    monkeypatch.setattr(prov, "_client", _FakeClient())
+    key = fixture_key(MODEL, "PROMPT", {"type": "object"})
+    out = prov.draft(prompt="PROMPT", response_schema={"type": "object"}, fixture_key=key)
+    assert out["rule_id"] == "C-LIVE"
+    assert (tmp_path / f"{key}.json").exists()          # recorded for offline replay
