@@ -97,6 +97,19 @@ class DomainVerifier(Protocol):
         """Variable-length lexicographic objective."""
         ...
 
+    def optimality_tripwire(self, ir: Any, objective: tuple[int, ...]) -> bool:
+        """Same-engine optimality tripwire over the domain's signed objective.
+
+        ``True`` iff no feasible plan is lexicographically better than
+        ``objective``. The SEAM imposes NO arity — ``objective`` is a
+        variable-length tuple — so a non-FJSP domain may receive a deeper
+        objective without the contract raising. A domain that does not (yet)
+        encode a strict-improvement model returns ``False`` honestly (the
+        tripwire is solver-reported, not asserted) rather than forcing a fixed
+        arity. The manufacturing implementation delegates to the FJSP len==2
+        encoding (which keeps its own 2-level assertion)."""
+        ...
+
     def kpis(self) -> list[Any]:
         """Allow-listed (emit-only) KPI recompute fns."""
         ...

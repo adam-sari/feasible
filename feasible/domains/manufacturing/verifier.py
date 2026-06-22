@@ -348,6 +348,20 @@ class ManufacturingVerifier:
 
         return recompute_objective(ir, plan)
 
+    def optimality_tripwire(self, ir: Any, objective: tuple[int, ...]) -> bool:
+        """The manufacturing same-engine optimality tripwire.
+
+        Delegates VERBATIM to ``feasible.solve.optimality.optimality_tripwire``
+        — the FJSP CP-SAT model with exactly two lexicographic levels
+        (weighted_tardiness, total_changeover). That implementation keeps its
+        own ``len == 2`` assertion (a deeper objective is not a manufacturing
+        objective); the *seam* itself imposes no arity, so a non-FJSP domain can
+        opt out honestly without that assertion. Lazy import to avoid a
+        solve<->domain import cycle (mirrors ``objective`` above)."""
+        from feasible.solve.optimality import optimality_tripwire
+
+        return optimality_tripwire(ir, objective)
+
     def kpis(self) -> list[Any]:
         """The allow-listed (emit-only) KPI recompute entries, keyed by KPI name.
 

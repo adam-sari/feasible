@@ -34,7 +34,6 @@ from feasible.domains import UnknownDomainError, get_domain
 from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import assert_all_hard_rules_supported
-from feasible.solve.optimality import optimality_tripwire
 from feasible.solve.orchestrate import SolveResult
 from feasible.smt.attest import AttestResult
 
@@ -173,8 +172,12 @@ def emit_plan_cert(
     dropped = dropped or []
     rpd = rule_pack_digest_override or rule_pack_digest(ir)  # universe digest when called from certify
     objective = list(result.objective) if result.objective else [0, 0]
-    # variable-length lexicographic objective tuple (manufacturing emits 2 levels)
-    tripwire_ok = optimality_tripwire(ir, tuple(objective))
+    # variable-length lexicographic objective tuple (manufacturing emits 2 levels).
+    # Routed through the per-domain SEAM (``verifier`` resolved just above):
+    # ``ManufacturingVerifier.optimality_tripwire`` delegates VERBATIM to the FJSP
+    # ``solve.optimality.optimality_tripwire`` (len==2) → byte-identical here, while a
+    # NON-FJSP domain opts out honestly behind the same seam (no fixed arity).
+    tripwire_ok = verifier.optimality_tripwire(ir, tuple(objective))
     gap_bps = 0 if (result.gap == 0.0) else -1  # -1 = not proven optimal
 
     cert: dict = {
