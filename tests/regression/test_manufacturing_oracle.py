@@ -64,6 +64,7 @@ def oracle_surface(rp: dict, pc: dict) -> dict:
         "claims_feasibility": pc["claims"]["feasibility"],
         "objective": pc["claims"]["optimality"]["objective"]["value"],
         "kpi_vs_incumbent_B": pc["kpi_vs_incumbent_B"],
+        "kpi_function_refs": pc["kpi_function_refs"],
         "incumbent_A_failure": pc["incumbent_A_failure"],
         "rule_pack_ref": pc["rule_pack_ref"],
     }

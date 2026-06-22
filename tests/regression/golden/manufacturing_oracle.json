@@ -107,6 +107,23 @@
       "incumbent_b": 90
     }
   },
+  "kpi_function_refs": {
+    "weighted_tardiness": {
+      "function_id": "mfg:weighted_tardiness",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    },
+    "late_priority_orders": {
+      "function_id": "mfg:late_priority_orders",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    },
+    "total_changeover_time": {
+      "function_id": "mfg:total_changeover_time",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    }
+  },
   "incumbent_A_failure": {
     "violated_rule_ref": "R-6.1-NIGHT-CLEANOUT",
     "span": {
