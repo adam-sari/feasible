@@ -12,45 +12,40 @@ import copy
 
 import pytest
 
+from feasible import api
 from feasible.canon.canonical import digest_of, new_signing_key, public_key_hex, sign_dsse
-from feasible.cert.plan_cert import emit_plan_cert, rule_pack_digest, verify_plan_cert
+from feasible.cert.plan_cert import rule_pack_digest, verify_plan_cert
 from feasible.cert.rulepack_cert import (
     bundle_binding_reasons,
-    emit_rulepack_cert,
     verify_rulepack_cert,
 )
 from feasible.checker.checker import check
-from feasible.conflict.policy import ConflictPolicy, DEFAULT_TRUSTED_POLICIES, MANUFACTURING_POLICY
-from feasible.govern.pipeline import govern_pack
+from feasible.conflict.policy import ConflictPolicy, DEFAULT_TRUSTED_POLICIES
 from feasible.ir.domain import FCIR, Plan
-from feasible.scenario import (
-    SHOP_RULES,
-    build_extracted_pack,
-    generate_incumbent_b,
-    make_incumbent_a,
-)
-from feasible.smt.attest import attest_feasibility
-from feasible.solve.orchestrate import solve
+
+
+# The forgery suite is parametrized over the registered DOMAINS (manufacturing
+# only for Spec 0; the datacenter track adds "datacenter" in its own fork). Every
+# attack runs against the bundle the FACADE builds — the same two-cert
+# orchestration the CLI ships — so the forge-resistance guarantees are proven over
+# the production path, not a test-local reconstruction.
+@pytest.fixture(scope="module", params=["manufacturing"])
+def domain_id(request):
+    return request.param
 
 
 @pytest.fixture(scope="module")
-def bundle():
-    gov = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY)
+def bundle(domain_id):
+    # build the honest two-cert bundle through the facade (single orchestration)
     key = new_signing_key()
-    rp = emit_rulepack_cert(gov.universe_ir, SHOP_RULES, MANUFACTURING_POLICY, gov.resolutions, key)
-    res = solve(gov.active_ir)
-    plan = res.plan
-    inc_b = generate_incumbent_b(gov.active_ir)
-    inc_a = make_incumbent_a(inc_b)
-    dropped = [{"rule_id": rid, "drop_reason": "rule_inactive_for_plan_by_policy",
-                "resolution_mode": "AUTO_BY_POLICY",
-                "conflict_policy_ref": {"policy_id": MANUFACTURING_POLICY.policy_id,
-                                        "digest": MANUFACTURING_POLICY.digest()}}
-               for rid in gov.dropped_rule_ids]
-    pc = emit_plan_cert(gov.active_ir, plan, res, check(plan, gov.active_ir),
-                        attest_feasibility(plan, gov.active_ir), inc_a, inc_b, key,
-                        dropped=dropped, rule_pack_digest_override=rule_pack_digest(gov.universe_ir))
-    return {"gov": gov, "key": key, "rp": rp, "pc": pc}
+    result = api.certify(domain_id, signer_key=key)
+    pc, rp = result.plan_cert, result.rule_pack_cert
+    # the governed ACTIVE instance (the surface incumbent_b is built/checked over);
+    # surfaced so the A10 degenerate-incumbent attack can craft an infeasible plan.
+    active_instance = FCIR.model_validate(  # reconstruct from the signed cert body
+        {"rules": pc["rules"], "instance": pc["instance"], "domain_id": domain_id}).instance
+    return {"domain_id": domain_id, "key": key, "rp": rp, "pc": pc,
+            "active_instance": active_instance}
 
 
 def _resign(cert: dict, key) -> dict:
@@ -211,7 +206,7 @@ def test_policy_inversion_cannot_drop_hard_obligation(bundle) -> None:
 # A10 — infeasible incumbent_B inflates the KPI denominator
 # ---------------------------------------------------------------------------
 def test_infeasible_incumbent_b_rejected(bundle) -> None:
-    inst = bundle["gov"].active_ir.instance
+    inst = bundle["active_instance"]
     degenerate = Plan(
         assignments={o.op_id: (max(0, inst.horizon - o.duration), o.eligible_machines[0])
                      for o in inst.operations},

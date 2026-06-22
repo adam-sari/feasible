@@ -6,11 +6,11 @@ from pathlib import Path
 
 import typer
 
-from feasible.canon.canonical import new_signing_key, public_key_from_hex, public_key_hex
-from feasible.cert.plan_cert import emit_plan_cert, render_html, rule_pack_digest, verify_plan_cert
-from feasible.cert.rulepack_cert import bundle_binding_reasons, emit_rulepack_cert, verify_rulepack_cert
+from feasible import api
+from feasible.canon.canonical import new_signing_key, public_key_hex
+from feasible.cert.plan_cert import emit_plan_cert, render_html
 from feasible.checker.checker import check
-from feasible.conflict.policy import DEFAULT_TRUSTED_POLICIES, MANUFACTURING_POLICY
+from feasible.conflict.policy import MANUFACTURING_POLICY
 from feasible.govern.coverage import build_coverage_ledger
 from feasible.govern.pipeline import govern_pack
 from feasible.scenario import (
@@ -23,6 +23,11 @@ from feasible.scenario import (
 )
 from feasible.smt.attest import attest_feasibility
 from feasible.solve.orchestrate import solve
+
+# The manufacturing scenario the CLI certifies (the facade resolves the domain
+# bundle by id; the CLI's scenario-dir argument selects the SOP/incumbent files
+# for the bare ``run`` path and stays accepted for backward compatibility).
+_DOMAIN_ID = "manufacturing"
 
 app = typer.Typer(add_completion=False, help="Feasible — generate + verify + certify scheduling.")
 
@@ -82,22 +87,12 @@ def verify(
     cert = json.loads(Path(cert_path).read_text(encoding="utf-8"))
     # pin to the supplied trusted key; otherwise fall back to the cert's self-described key
     pinned_hex = _resolve_signer_key(signer_key) if signer_key else None
-    pubkey = public_key_from_hex(pinned_hex or cert["signature"]["public_key_hex"])
-    res = verify_plan_cert(cert, pubkey)
-    reasons = list(res.reasons)
-    ok = res.ok
+    rp = json.loads(Path(rulepack).read_text(encoding="utf-8")) if rulepack is not None else None
 
-    if rulepack is not None:
-        rp = json.loads(Path(rulepack).read_text(encoding="utf-8"))
-        rp_pubkey = public_key_from_hex(pinned_hex or rp["signature"]["public_key_hex"])
-        rp_res = verify_rulepack_cert(rp, rp_pubkey, trusted_policies=DEFAULT_TRUSTED_POLICIES)
-        if not rp_res.ok:
-            ok = False
-            reasons += [f"rulepack: {r}" for r in rp_res.reasons]
-        bundle = bundle_binding_reasons(cert, rp)  # digest + instance + active-set + rule-body + policy binding
-        if bundle:
-            ok = False
-            reasons += bundle
+    # route through the facade — the SINGLE solver-free verify orchestration
+    view = api.verify(cert, rp, signer_key=pinned_hex)
+    reasons = list(view.reasons)
+    ok = view.ok
 
     auth = "SIGNER AUTHENTICATED (pinned key)" if pinned_hex else \
         "signer SELF-DESCRIBED — pass --signer-key to authenticate (re-check passed, identity UNVERIFIED)"
@@ -127,20 +122,33 @@ def certify(
     rulepack_out: str = typer.Option("rule_pack_cert.json", help="output rule-pack-cert path"),
 ) -> None:
     """The FULL loop: messy extraction -> governance -> Rule-Pack Cert -> solve -> Plan Cert -> verify both."""
-    _golden, inc_a, inc_b = load_scenario(scenario_dir)
+    # the two-cert orchestration is the facade's SINGLE source of truth; the CLI
+    # signs under an explicit key (so it can publish signer_pub.hex), writes the
+    # files, re-derives the governance + KPI narrative for display, and verifies
+    # through the same facade. The scenario-dir argument is retained for backward
+    # compatibility (it selects the SOP/incumbent files the demo loop reads).
+    key = new_signing_key()
+    cert_result = api.certify(_DOMAIN_ID, signer_key=key)
+    plan_cert = cert_result.plan_cert
+    rp_cert = cert_result.rule_pack_cert
 
-    # 1) messy extraction + governance
+    Path(rulepack_out).write_text(json.dumps(rp_cert, indent=2), encoding="utf-8")
+    Path(out).write_text(json.dumps(plan_cert, indent=2), encoding="utf-8")
+    Path(out).with_suffix(".html").write_text(render_html(plan_cert), encoding="utf-8")
+    # publish the signer's PUBLIC key so an auditor can pin it: `verify --signer-key signer_pub.hex`
+    signer_path = Path(out).with_name("signer_pub.hex")
+    signer_path.write_text(public_key_hex(key), encoding="utf-8")
+
+    # display narrative — re-derived from the governance run (NOT load-bearing; the
+    # certs themselves are the source of truth, re-verified below).
     extracted = build_extracted_pack()
     gov = govern_pack(extracted, MANUFACTURING_POLICY)
-    universe_ir = gov.universe_ir  # full approved set (R-4.4 retained) — what the Rule-Pack Cert certifies
-    active_ir = gov.active_ir      # minus policy-dropped rules — what the plan is solved/checked against
+    universe_ir = gov.universe_ir
+    active_ir = gov.active_ir
     coverage = build_coverage_ledger(SHOP_RULES, universe_ir)
-    dropped = [
-        {"rule_id": rid, "drop_reason": "rule_inactive_for_plan_by_policy",
-         "resolution_mode": "AUTO_BY_POLICY",
-         "conflict_policy_ref": {"policy_id": MANUFACTURING_POLICY.policy_id, "digest": MANUFACTURING_POLICY.digest()}}
-        for rid in gov.dropped_rule_ids
-    ]
+    _golden, _inc_a, inc_b = load_scenario(scenario_dir)
+    from feasible.ir.domain import Plan as _Plan
+    plan = _Plan.model_validate(plan_cert["plan"])
 
     typer.echo("=== Feasible certify (full loop) ===")
     typer.echo(f"extraction: {len(extracted.rules)} candidate rules -> "
@@ -152,48 +160,28 @@ def certify(
         typer.echo(f"§4.4 conflict [{r.conflict.obligation_id} vs {r.conflict.permission_id}]: "
                    f"{r.resolution_mode} -> {r.rationale}")
 
-    # 2) Rule-Pack Certificate — over the UNIVERSE (R-4.4 present; coverage + replay need it)
-    key = new_signing_key()
-    rp_cert = emit_rulepack_cert(universe_ir, SHOP_RULES, MANUFACTURING_POLICY, gov.resolutions, key)
-    Path(rulepack_out).write_text(json.dumps(rp_cert, indent=2), encoding="utf-8")
-    universe_digest = rule_pack_digest(universe_ir)
-
-    # 3) solve + Plan Certificate over the ACTIVE set (binds to the universe rule-pack digest)
-    result = solve(active_ir, max_seconds=30.0)
-    if result.plan is None:
-        typer.echo(f"solve status: {result.status} (no plan)")
-        raise typer.Exit(1)
-    plan = result.plan
+    # verify both + the cross-cert binding THROUGH THE FACADE (the single solver-free path)
+    view = api.verify(plan_cert, rp_cert, signer_key=key)
     chk = check(plan, active_ir)
-    att = attest_feasibility(plan, active_ir)
-    plan_cert = emit_plan_cert(active_ir, plan, result, chk, att, inc_a, inc_b, key,
-                               dropped=dropped, rule_pack_digest_override=universe_digest)
-    Path(out).write_text(json.dumps(plan_cert, indent=2), encoding="utf-8")
-    Path(out).with_suffix(".html").write_text(render_html(plan_cert), encoding="utf-8")
-    # publish the signer's PUBLIC key so an auditor can pin it: `verify --signer-key signer_pub.hex`
-    signer_path = Path(out).with_name("signer_pub.hex")
-    signer_path.write_text(public_key_hex(key), encoding="utf-8")
+    obj = plan_cert["claims"]["optimality"]["objective"]["value"]
 
-    # 4) verify both (policy pinned to the published trust store) + the cross-cert binding
-    rp_ok = verify_rulepack_cert(rp_cert, key.public_key(), trusted_policies=DEFAULT_TRUSTED_POLICIES)
-    pl_ok = verify_plan_cert(plan_cert, key.public_key())
-    bundle = bundle_binding_reasons(plan_cert, rp_cert)  # digest + instance + active-set + rule-body + policy
-    bound = not bundle and plan_cert["rule_pack_ref"]["rule_pack_digest"] == universe_digest
-
-    typer.echo(f"plan: status={result.status} objective(wt,co)={result.objective} checker={'PASS' if chk.passed else 'FAIL'}")
+    typer.echo(f"plan: status={plan_cert['claims']['optimality']['label']['value']} "
+               f"objective(wt,co)={tuple(obj)} checker={'PASS' if chk.passed else 'FAIL'}")
     typer.echo("KPI vs incumbent B:")
     typer.echo(f"  weighted_tardiness : {weighted_tardiness(active_ir, plan)}  vs  {weighted_tardiness(active_ir, inc_b)}")
     typer.echo(f"  late_priority_ords : {late_priority_orders(active_ir, plan)}  vs  {late_priority_orders(active_ir, inc_b)}")
     typer.echo(f"  total_changeover   : {total_changeover_time(active_ir, plan)}  vs  {total_changeover_time(active_ir, inc_b)}")
     fa = plan_cert["incumbent_A_failure"]
     typer.echo(f"GOTCHA — incumbent A violates {fa['violated_rule_ref']}: \"{fa['span']['quoted_text']}\"")
-    typer.echo(f"Rule-Pack Cert verify: {'OK' if rp_ok.ok else 'FAIL ' + str(rp_ok.reasons)}")
-    typer.echo(f"Plan Cert verify     : {'OK' if pl_ok.ok else 'FAIL ' + str(pl_ok.reasons)}")
-    typer.echo(f"two-cert digest binding: {'OK' if bound else 'MISMATCH ' + str(bundle)}")
+    rp_ok_disp = "OK" if view.ok else "FAIL " + str([r for r in view.reasons if r.startswith("rulepack:")])
+    pl_ok_disp = "OK" if view.ok else "FAIL " + str([r for r in view.reasons if not r.startswith("rulepack:")])
+    typer.echo(f"Rule-Pack Cert verify: {rp_ok_disp}")
+    typer.echo(f"Plan Cert verify     : {pl_ok_disp}")
+    typer.echo(f"two-cert digest binding: {'OK' if view.ok else 'MISMATCH ' + str(view.reasons)}")
     typer.echo(f"signer public key -> {signer_path} ({public_key_hex(key)[:16]}…)  "
                f"(auditor: verify --signer-key {signer_path.name})")
     typer.echo(f"wrote {rulepack_out}, {out}, {Path(out).with_suffix('.html')}")
-    if not (rp_ok.ok and pl_ok.ok and bound and chk.passed):
+    if not view.ok:
         raise typer.Exit(1)
 
 
