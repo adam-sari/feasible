@@ -33,7 +33,7 @@ from feasible.checker.plan_shape import validate_plan_shape
 from feasible.domains import UnknownDomainError, get_domain
 from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
-from feasible.registry import EVALUATED_RULE_IDS, STRUCTURAL_RULE_KINDS, assert_all_hard_rules_supported
+from feasible.registry import assert_all_hard_rules_supported
 from feasible.solve.optimality import optimality_tripwire
 from feasible.solve.orchestrate import SolveResult
 from feasible.smt.attest import AttestResult
@@ -69,14 +69,32 @@ def active_rule_set_digest(ir: FCIR, dropped: list) -> str:
     return digest_of({"active": active_rule_ids(ir), "dropped": ids})
 
 
+def _domain_formalization_sets(ir: FCIR) -> tuple[frozenset[str], frozenset[str]]:
+    """The ``(evaluated_rule_ids, structural_rule_kinds)`` of ``ir``'s signed
+    domain, resolved through the per-domain ``DomainVerifier`` seam (the same
+    delegate pattern ``registry.is_supported`` uses). For manufacturing these are
+    byte-identical to the module-level ``EVALUATED_RULE_IDS`` / ``STRUCTURAL_RULE_KINDS``
+    (``ManufacturingVerifier.evaluated_rule_ids == EVALUATED_RULE_IDS`` and
+    ``.structural_rule_kinds == STRUCTURAL_RULE_KINDS``); a SECOND domain sources
+    ITS own sets, so its formalization leaves are no longer vacuously ``[]``. An
+    unknown domain supports nothing (fail-closed → empty sets)."""
+    try:
+        _domain, verifier = get_domain(ir.domain_id)
+    except UnknownDomainError:
+        return frozenset(), frozenset()
+    return verifier.evaluated_rule_ids, verifier.structural_rule_kinds
+
+
 def checked_rule_ids(ir: FCIR) -> list[str]:
     """Active hard rules an explicit predicate evaluates (excludes structural ones)."""
-    return sorted(EVALUATED_RULE_IDS & set(active_rule_ids(ir)))
+    evaluated, _structural = _domain_formalization_sets(ir)
+    return sorted(evaluated & set(active_rule_ids(ir)))
 
 
 def structurally_enforced_rule_ids(ir: FCIR) -> list[str]:
     """Active hard rules guaranteed by the model (e.g. non_preemption) — NOT predicate-checked."""
-    return sorted(r.rule_id for r in ir.hard_plan_rules() if r.kind in STRUCTURAL_RULE_KINDS)
+    _evaluated, structural = _domain_formalization_sets(ir)
+    return sorted(r.rule_id for r in ir.hard_plan_rules() if r.kind in structural)
 
 
 def _kpi_registry_for(domain_id: str) -> dict:

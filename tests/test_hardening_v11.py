@@ -10,8 +10,10 @@ import pytest
 from feasible.canon.canonical import new_signing_key, public_key_hex, sign_dsse, verify_dsse
 from feasible.cert.plan_cert import (
     active_rule_set_digest,
+    checked_rule_ids,
     emit_plan_cert,
     rule_pack_digest,
+    structurally_enforced_rule_ids,
     verify_plan_cert,
 )
 from feasible.cert.rulepack_cert import (
@@ -289,6 +291,70 @@ def test_plan_cert_rederives_formalization_leaves(certs, group, leaf, bad_value,
     res = verify_plan_cert(bad, certs["key"].public_key())
     assert res.ok is False
     assert any(token in r for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# Task 1b — the formalization-leaf helpers source their id sets PER DOMAIN
+# (not the module-level manufacturing-only EVALUATED_RULE_IDS/STRUCTURAL_RULE_KINDS).
+# For a 2nd domain whose verifier declares non-empty evaluated/structural sets,
+# the leaves must be NON-EMPTY (today they'd be [] — a materially-FALSE signed
+# claim that 0 of the domain's hard rules are checked/structurally-enforced).
+# ---------------------------------------------------------------------------
+class _StubVerifier:
+    """A minimal 2nd-domain verifier declaring non-empty formalization id sets."""
+
+    domain_id = "stubdom"
+    rule_kinds = frozenset({"sd_predicate", "sd_structural"})
+    evaluated_rule_ids = frozenset({"sd:checked_a", "sd:checked_b"})
+    structural_rule_kinds = frozenset({"sd_structural"})
+    known_rule_ids = evaluated_rule_ids | frozenset({"sd:structural_x"})
+
+
+def _stub_rule(rule_id: str, kind: str) -> Rule:
+    from feasible.ir.domain import ClauseKind, CompileMode, ExceptionMode, Provenance, Severity, TextSpan
+    return Rule(rule_id=rule_id, kind=kind, params={}, severity=Severity.HARD,
+                clause_kind=ClauseKind.OBLIGATION, compile_mode=CompileMode.PLAN_CONSTRAINT,
+                resolution_class="X", exception_mode=ExceptionMode.NONE,
+                provenance=Provenance(spans=[TextSpan(quoted_text="stub")]))
+
+
+@pytest.fixture
+def stub_domain():
+    from feasible.domains import _DOMAINS, register_domain
+    register_domain("stubdom", object(), _StubVerifier())  # type: ignore[arg-type]
+    try:
+        yield
+    finally:
+        _DOMAINS.pop("stubdom", None)
+
+
+def _stub_ir():
+    inst = build_scenario_ir().instance  # any valid Instance; the helpers read rule_ids/kinds
+    rules = [
+        _stub_rule("sd:checked_a", "sd_predicate"),
+        _stub_rule("sd:checked_b", "sd_predicate"),
+        _stub_rule("sd:structural_x", "sd_structural"),
+    ]
+    return FCIR(rules=rules, instance=inst, domain_id="stubdom")
+
+
+def test_formalization_leaves_manufacturing_unchanged() -> None:
+    ir = govern_pack(build_extracted_pack(), MANUFACTURING_POLICY).active_ir
+    # byte-identical to the module-level manufacturing view (the oracle's proof,
+    # restated here as a direct unit assertion)
+    active = {r.rule_id for r in ir.hard_plan_rules()}
+    mfg_checked = {"R-ROUTING", "R-NOOVERLAP", "R-SETUP", "R-MAINT", "R-SHIFT", "R-6.1-NIGHT-CLEANOUT"}
+    assert checked_rule_ids(ir) == sorted(mfg_checked & active)
+    assert "R-5.2" in structurally_enforced_rule_ids(ir)
+    assert "R-5.2" not in checked_rule_ids(ir)
+    assert len(checked_rule_ids(ir)) == 6
+
+
+def test_formalization_leaves_source_per_domain(stub_domain) -> None:
+    ir = _stub_ir()
+    # TODAY (module-level mfg sets) both resolve to [] for stubdom — the BUG.
+    assert checked_rule_ids(ir) == ["sd:checked_a", "sd:checked_b"]
+    assert structurally_enforced_rule_ids(ir) == ["sd:structural_x"]
 
 
 def test_plan_cert_rederives_active_rule_ids(certs) -> None:
