@@ -109,6 +109,17 @@ class ManufacturingDomain:
 
         return {"machines": list(MACHINES)}
 
+    def capacity_series(
+        self, plan: Any, instance: Any
+    ) -> tuple[list[dict], list[dict]] | None:
+        """Manufacturing has NO capacity overlay → ``None``.
+
+        The seam is RECOMPUTE-not-trusted (a domain with an overlay derives the two
+        lists from the signed ``plan`` + ``instance``); manufacturing's timeline is
+        machine-lane intervals only, so it opts out honestly — the
+        datacenter-only ``TimelineView`` fields stay ``None`` (byte-identical)."""
+        return None
+
     def trust_boundary_extra(self) -> dict[str, Any]:
         """Domain-specific trust-boundary notes. Manufacturing has none beyond
         the substrate's, so this is empty (datacenter adds capacity-recompute)."""

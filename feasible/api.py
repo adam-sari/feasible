@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from feasible.canon.canonical import new_signing_key, public_key_from_hex
 from feasible.cert.plan_cert import (
+    _fcir_from_cert,
     emit_plan_cert,
     rule_pack_digest,
     verify_plan_cert,
@@ -53,6 +54,23 @@ from feasible.smt.attest import attest_feasibility
 # The registered scenarios surfaced by the facade. Manufacturing only for Spec 0;
 # the datacenter track appends its id here when it forks against this seam.
 _SCENARIOS: list[str] = ["manufacturing"]
+
+# The CANONICAL authenticated/self-described sentences — the EXACT wording the CLI
+# prints (``cli.verify``'s ``auth`` line, cli.py:97-98). The facade is the single
+# source of this wording so Track A renders it VERBATIM instead of fabricating
+# prose. ``signature`` selects which one a ``TrustVector``/``VerifyView`` carries.
+SIGNER_NOTE_AUTHENTICATED = "SIGNER AUTHENTICATED (pinned key)"
+SIGNER_NOTE_SELF_DESCRIBED = (
+    "signer SELF-DESCRIBED — pass --signer-key to authenticate "
+    "(re-check passed, identity UNVERIFIED)"
+)
+
+
+def _signer_note(signature: str) -> str:
+    """The canonical sentence for a signature mode (authenticated => pinned-key
+    wording; anything else => self-described). The single source of the prose the
+    CLI prints and Track A renders verbatim."""
+    return SIGNER_NOTE_AUTHENTICATED if signature == "authenticated" else SIGNER_NOTE_SELF_DESCRIBED
 
 
 def _resolve(domain_id: str) -> tuple[Domain, DomainVerifier]:
@@ -208,7 +226,24 @@ def get_timeline(domain_id: str, *, signer_key: Ed25519PrivateKey | None = None)
         {"op_id": "CLEANOUT", "machine": cm, "start": cs, "end": ce, "reason": reason}
         for (cm, cs, ce, reason) in plan["cleanouts"]
     ]
-    return TimelineView(domain_id=domain_id, lanes=lanes, intervals=intervals)
+    # branch-free capacity overlay through the per-domain seam: RECOMPUTED from the
+    # SIGNED plan + instance (never trusted from rendered metadata). Manufacturing
+    # returns None (no overlay) → the datacenter-only fields stay None; a domain
+    # with an overlay plugs its recompute behind THIS seam. The plan/instance are
+    # reconstructed from the signed cert bodies so the seam recomputes over the same
+    # objects ``verify`` re-checks.
+    signed_plan = Plan.model_validate(plan)
+    signed_instance = _fcir_from_cert(result.plan_cert).instance
+    overlay = domain.capacity_series(signed_plan, signed_instance)
+    capacity_series = overlay[0] if overlay is not None else None
+    threshold_lines = overlay[1] if overlay is not None else None
+    return TimelineView(
+        domain_id=domain_id,
+        lanes=lanes,
+        intervals=intervals,
+        capacity_series=capacity_series,
+        threshold_lines=threshold_lines,
+    )
 
 
 def _public_key_for(cert: dict, signer_key_hex: str | None) -> Ed25519PublicKey:
@@ -249,6 +284,7 @@ def _trust_vector(
         coverage=extra.get("coverage", "calibrated"),
         conflict_replay=extra.get("conflict_replay", "verified"),
         data=extra.get("data", "real"),
+        signer_note=_signer_note(signature),
     )
 
 
@@ -292,6 +328,7 @@ def verify(
     # under a caller-pinned key; checker pass only if the (bundled) verify passed.
     domain, verifier = _resolve(plan_cert["domain_id"])
     signature = "authenticated" if signer_hex is not None else "self_described"
+    note = _signer_note(signature)
     extra = domain.trust_boundary_extra()
     trust_vector = TrustVector(
         signature=signature,
@@ -299,8 +336,9 @@ def verify(
         coverage=extra.get("coverage", "calibrated"),
         conflict_replay=extra.get("conflict_replay", "verified"),
         data=extra.get("data", "real"),
+        signer_note=note,
     )
-    return VerifyView(ok=ok, reasons=reasons, trust_vector=trust_vector)
+    return VerifyView(ok=ok, reasons=reasons, trust_vector=trust_vector, signer_note=note)
 
 
 def _signer_hex(

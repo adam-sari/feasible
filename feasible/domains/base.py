@@ -189,6 +189,21 @@ class Domain(Protocol):
         ``orchestrate.solve`` → byte-identical."""
         ...
 
+    def capacity_series(
+        self, plan: Any, instance: Any
+    ) -> tuple[list[dict], list[dict]] | None:
+        """The timeline capacity overlay ``(capacity_series, threshold_lines)``, or
+        ``None`` for a domain with no overlay (manufacturing).
+
+        RECOMPUTED from the SIGNED ``plan`` + ``instance`` — never trusted from
+        rendered metadata — so the rendered overlay is as trustworthy as the cert.
+        ``get_timeline`` calls this seam (branch-free) and populates the
+        datacenter-only ``TimelineView`` fields. Frozen item schema (the facade
+        schema doc): ``capacity_series`` item ``{"t": int, "value": int, "group":
+        str | None}``; ``threshold_lines`` item ``{"label": str, "value": int}``.
+        Manufacturing returns ``None`` → byte-identical timeline."""
+        ...
+
 
 # --------------------------------------------------------------------------- #
 # Facade view-models (design §1.5) — frozen schema, datacenter-only fields    #
@@ -230,6 +245,10 @@ class TrustVector:
     coverage: str   # "calibrated" | "preview"
     conflict_replay: str  # "verified" | "illustrative"
     data: str       # "real" | "synthetic"
+    # The canonical authenticated/self-described sentence — the EXACT wording the
+    # CLI prints (``cli.verify``'s ``auth`` line). Surfaced so Track A renders it
+    # VERBATIM instead of fabricating prose; the facade is the single source of it.
+    signer_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -258,10 +277,35 @@ class CertsView:
 
 
 @dataclass(frozen=True)
+class CapacitySeriesItem:
+    """Frozen item schema for a ``TimelineView.capacity_series`` point — the
+    contract the datacenter track populates (recomputed from the signed
+    plan+instance). ``group`` is the optional capacity bucket (e.g. a power zone)."""
+
+    t: int
+    value: int
+    group: str | None = None
+
+
+@dataclass(frozen=True)
+class ThresholdLine:
+    """Frozen item schema for a ``TimelineView.threshold_lines`` entry — a labeled
+    capacity floor/ceiling line drawn across the timeline (e.g. an N+1 redundancy
+    floor). Recomputed from the signed instance, never trusted from metadata."""
+
+    label: str
+    value: int
+
+
+@dataclass(frozen=True)
 class VerifyView:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     trust_vector: TrustVector | None = None
+    # The canonical authenticated/self-described sentence (mirrors
+    # ``TrustVector.signer_note``) so a verify consumer reads it without unwrapping
+    # the trust vector. Byte-matches the CLI's ``auth`` line.
+    signer_note: str = ""
 
 
 # --------------------------------------------------------------------------- #
