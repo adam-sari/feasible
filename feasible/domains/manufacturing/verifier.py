@@ -85,6 +85,13 @@ class ManufacturingVerifier:
         "R-ROUTING", "R-NOOVERLAP", "R-SETUP", "R-MAINT", "R-SHIFT", "R-6.1-NIGHT-CLEANOUT",
     })
     structural_rule_kinds: frozenset[str] = frozenset({"non_preemption"})
+    # The complete set of rule_ids manufacturing owns (the cross-domain isolation
+    # guard checks this set against a cert's signed domain). It is the evaluated
+    # (checked) ids PLUS the structural-kind-bearing id (``R-5.2``, the
+    # ``non_preemption`` compiled-only obligation) PLUS the conflict-only
+    # permission (``R-4.4``, the §4.4 cleanout-skip permission). Manufacturing
+    # keeps its existing un-namespaced ``R-*`` ids (no mass rename).
+    known_rule_ids: frozenset[str] = evaluated_rule_ids | frozenset({"R-5.2", "R-4.4"})
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         """The per-rule closed predicates (relocated verbatim from checker.py).

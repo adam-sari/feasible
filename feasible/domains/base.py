@@ -73,6 +73,13 @@ class DomainVerifier(Protocol):
     rule_kinds: frozenset[str]
     evaluated_rule_ids: frozenset[str]
     structural_rule_kinds: frozenset[str]
+    # The complete set of rule_ids this domain owns: the evaluated (checked) ids,
+    # the structural (compiled-only) ids, and the conflict-only permission ids.
+    # The signed ``domain_id`` selects the bundle; ``verify`` rejects any cert
+    # rule_id not in THIS set (the cross-domain isolation guard, fail-closed).
+    # Registered domains' ``known_rule_ids`` are asserted pairwise-disjoint
+    # (``domains_known_rule_ids_disjoint``) so a future id collision fails CI.
+    known_rule_ids: frozenset[str]
 
     def check_predicates(self, plan: Any, ir: Any) -> list[Any]:
         """Closed, total, P-time. Returns ``list[Violation]``."""
@@ -207,3 +214,31 @@ class VerifyView:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     trust_vector: TrustVector | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Cross-domain rule-id isolation guard (design Global Constraint)             #
+# --------------------------------------------------------------------------- #
+
+
+def domains_known_rule_ids_disjoint() -> bool:
+    """Assert every registered domain's ``known_rule_ids`` are pairwise-disjoint.
+
+    Cross-domain isolation is enforced by the signed ``domain_id`` + per-domain
+    ``known_rule_ids`` sets: a cert's every rule_id must belong to its signed
+    domain's set (fail-closed). For that to be unambiguous the sets must not
+    overlap — a single rule_id may belong to at most one domain. This guard is a
+    CI tripwire: a future id collision (e.g. a datacenter rule reusing an ``R-*``
+    id) flips it to ``False`` and fails the disjointness test.
+    """
+    # Imported lazily to avoid a base<->registry import cycle (the registry
+    # module imports the protocols defined above from this module).
+    from feasible.domains import _DOMAINS
+
+    seen: set[str] = set()
+    for _domain, verifier in _DOMAINS.values():
+        ids = set(verifier.known_rule_ids)
+        if ids & seen:
+            return False
+        seen |= ids
+    return True
