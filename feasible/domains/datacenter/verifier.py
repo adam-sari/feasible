@@ -960,17 +960,257 @@ class DatacenterVerifier:
         # asserts len==2). Task 9 binds the trust_boundary note.
         return False
 
-    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
-        """FREE-SEARCH Z3 strict-improvement encoding (T1.3 lands the real body).
+    # --------------------------------------------------------------------- #
+    # T1.3: FREE-SEARCH Z3 independent-optimality (two-layer encoding).      #
+    #                                                                        #
+    # The HEADLINE upgrade: ``optimality_tripwire`` opts out (returns        #
+    # ``False`` — no optimality backing at all). This disjoint Z3 free-search #
+    # encoding gives REAL independent optimality. CODE-DISJOINT from CP-SAT   #
+    # (no ``_dc_build_model`` vars imported — the arithmetic is re-expressed  #
+    # in z3-py, integers only). It mirrors ``_dc_build_model``: the           #
+    # maintenance_window disjointness, the per-timestep redundancy floor over #
+    # FREE task starts, and the FIXED structural caps — re-expressed over     #
+    # FREE ``task_start[op]`` decision vars instead of the pinned plan facts  #
+    # ``z3_encode`` uses.                                                     #
+    # --------------------------------------------------------------------- #
 
-        T1.1 STUB: returns ``None`` (honest opt-out). The same-engine
-        ``optimality_tripwire`` opts out (returns ``False``); T1.3 REPLACES this
-        stub with a real disjoint-engine free-search ``(stranded, makespan)``
-        strict-improvement encoding over the FREE maintenance-task starts — the
-        headline upgrade from "no optimality backing at all" to "corroborated by a
-        disjoint engine." Until then ``None`` maps to ``skipped`` (never falsely
-        corroborated)."""
-        return None
+    def _build_dc_free_vars(self, ir: FCIR) -> dict[str, Any]:
+        """Construct the FREE decision vars + the structural primitives shared by
+        every layer/helper. Returns a dict carrying the ``task_start``/``task_end``
+        var maps, the static ``task_path``/``task_dur``/``task_unit`` link facts, and
+        the horizon ``H`` — so the feasibility layer, the objective layer, and the
+        white-box helpers (``_pin_to_plan`` / ``_decode_witness``) all address the
+        SAME vars. Machine is NOT a free var (a maintenance task has a single static
+        eligible path); only the START is decided."""
+        H = ir.instance.horizon
+        links = _maintenance_task_links(ir)   # op_id -> (path, dur, unit)
+        task_start: dict[str, Any] = {}
+        task_end: dict[str, Any] = {}
+        task_path: dict[str, str] = {}
+        task_dur: dict[str, int] = {}
+        task_unit: dict[str, str | None] = {}
+        for op_id, (path, dur, unit) in sorted(links.items()):
+            task_start[op_id] = z3.Int(f"dc_start_{op_id}")
+            task_end[op_id] = z3.Int(f"dc_end_{op_id}")
+            task_path[op_id] = path
+            task_dur[op_id] = dur
+            task_unit[op_id] = unit
+        return {
+            "task_start": task_start, "task_end": task_end,
+            "task_path": task_path, "task_dur": task_dur, "task_unit": task_unit,
+            "H": H,
+        }
+
+    def _feasibility_only_encode(self, ir: FCIR) -> tuple["z3.Solver", dict[str, Any]]:
+        """The FULL dc hard-constraint encoding over the FREE ``task_start`` vars —
+        i.e. EVERYTHING except the objective vars (``stranded``, ``makespan``) and the
+        strict-improvement disjunction. Returns the solver AND the var maps so the
+        white-box helpers can address the free vars. The load-bearing split (RC-1):
+        the region test (c) pins to THIS layer, removing the objective confound (a
+        constructed adversary makes ``stranded > 0``, so an objective-bearing solver
+        would be UNSAT against the strict-improvement bound REGARDLESS of whether the
+        hard rules exist — a non-discriminating confound)."""
+        v = self._build_dc_free_vars(ir)
+        task_start, task_end = v["task_start"], v["task_end"]
+        task_path, task_dur, task_unit = v["task_path"], v["task_dur"], v["task_unit"]
+        H = v["H"]
+
+        s = z3.Solver()
+
+        # task_end == task_start + dur; task_start in [0, H - dur]
+        for op_id in task_start:
+            dur = task_dur[op_id]
+            s.add(task_end[op_id] == task_start[op_id] + dur)
+            s.add(task_start[op_id] >= 0)
+            s.add(task_start[op_id] <= max(0, H - dur))
+
+        # dc:maintenance_window (active): a task on a path avoids each forbidden window.
+        for r in ir.rules:
+            if r.rule_id != "dc:maintenance_window" or not ir.has_active(r.rule_id):
+                continue
+            p = r.params
+            path_id = str(p.get("path_id", ""))
+            forbidden = [(int(a), int(b)) for (a, b) in p.get("forbidden", [])]
+            for op_id, op_path in task_path.items():
+                if op_path != path_id:
+                    continue
+                for (fa, fb) in forbidden:
+                    s.add(z3.Or(task_end[op_id] <= fa, task_start[op_id] >= fb))
+
+        # dc:redundancy_floor (active): per group, per timestep, available_t >= floor.
+        # A unit is DOWN at t if (a) a FIXED instance maintenance interval covers t, or
+        # (b) a maintenance task linked to that unit runs over t. installed - down >= floor.
+        if _has_active_redundancy_group(ir):
+            for r in _active_redundancy_groups(ir):
+                p = r.params
+                units = [str(u) for u in p.get("units", [])]
+                floor = int(p.get("floor", 1 << 30))
+                maintenance = p.get("maintenance", {})
+                # tasks derating each unit in THIS group.
+                tasks_by_unit: dict[str, list[str]] = {}
+                for op_id, unit in task_unit.items():
+                    if unit is not None and unit in units:
+                        tasks_by_unit.setdefault(unit, []).append(op_id)
+                for t in range(H):
+                    up_terms: list[Any] = []
+                    for u in units:
+                        if any(a <= t < b for (a, b) in maintenance.get(u, [])):
+                            continue  # a FIXED outage removes the unit -> 0 up
+                        over = []
+                        for op_id in tasks_by_unit.get(u, []):
+                            # task runs over t iff start <= t AND start >= t - dur + 1.
+                            dur = task_dur[op_id]
+                            over.append(z3.And(task_start[op_id] <= t,
+                                               task_start[op_id] >= t - dur + 1))
+                        if over:
+                            # up_u == 1 iff NO linked task runs over t.
+                            up_terms.append(z3.If(z3.Or(*over), 0, 1))
+                        else:
+                            up_terms.append(z3.IntVal(1))
+                    available = z3.Sum(up_terms) if up_terms else z3.IntVal(0)
+                    s.add(available >= floor)
+
+        # dc:power_cap (active structural): FIXED feasibility check (v1 draws fixed).
+        # Integer cross-multiply (no float); a breach asserts a constant False -> UNSAT.
+        for r in ir.rules:
+            if r.rule_id != "dc:power_cap" or not ir.has_active(r.rule_id):
+                continue
+            p = r.params
+            scope = [str(u) for u in p.get("scope_units", [])]
+            cap_kw = int(p.get("cap_kw", 0))
+            per_member_pct = int(p.get("per_member_pct", 0))
+            draws = p.get("draws", {})
+            aggregate = sum(int(draws.get(u, cap_kw)) for u in scope)
+            s.add(z3.BoolVal(aggregate <= cap_kw))
+            for u in scope:
+                du = int(draws.get(u, cap_kw))
+                s.add(z3.BoolVal(100 * du <= per_member_pct * cap_kw))
+
+        # dc:anti_affinity (active structural): FIXED feasibility check (v1 placement).
+        for r in ir.rules:
+            if r.rule_id != "dc:anti_affinity" or not ir.has_active(r.rule_id):
+                continue
+            p = r.params
+            replicas = [str(u) for u in p.get("replicas", [])]
+            fault_domain_of = p.get("fault_domain_of", {})
+            for i in range(len(replicas)):
+                for j in range(i + 1, len(replicas)):
+                    fd1 = fault_domain_of.get(replicas[i], _MISSING)
+                    fd2 = fault_domain_of.get(replicas[j], _MISSING)
+                    collide = (fd1 is _MISSING) or (fd2 is _MISSING) or (fd1 == fd2)
+                    s.add(z3.BoolVal(not collide))  # a collision -> UNSAT
+
+        return s, v
+
+    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
+        """FREE-SEARCH Z3 strict-improvement encoding (the layer ON TOP of the
+        feasibility-only layer): the full dc hard-constraint set over FREE
+        ``task_start`` vars PLUS the objective vars (``stranded``, ``makespan``) PLUS
+        the two-level lexicographic strict-improvement disjunction ``Or(stranded<v0,
+        And(stranded==v0, makespan<v1))``. UNSAT => no feasible plan beats V =>
+        corroborated. This REPLACES the honest opt-out of the same-engine
+        ``optimality_tripwire`` (which returns ``False``) with a genuine
+        disjoint-engine backing — the HEADLINE upgrade of T1.
+
+        The SEAM imposes no arity: a non-2-level ``V`` is the honest ``None`` opt-out
+        (the dc objective has exactly two levels). ``None`` maps to ``skipped`` (never
+        falsely corroborated)."""
+        if len(V) != 2:
+            return None
+        s, v = self._feasibility_only_encode(ir)
+        task_end, task_dur = v["task_end"], v["task_dur"]
+        task_unit = v["task_unit"]
+        task_start = v["task_start"]
+        H = v["H"]
+
+        # stranded == sum_g sum_t max(0, floor_g - available_{g,t}) over the FREE plan
+        # (mirror stranded_power / _dc_build_model's shortfall terms).
+        shortfall_terms: list[Any] = []
+        if _has_active_redundancy_group(ir):
+            for r in _active_redundancy_groups(ir):
+                p = r.params
+                units = [str(u) for u in p.get("units", [])]
+                floor = int(p.get("floor", 0))
+                maintenance = p.get("maintenance", {})
+                tasks_by_unit: dict[str, list[str]] = {}
+                for op_id, unit in task_unit.items():
+                    if unit is not None and unit in units:
+                        tasks_by_unit.setdefault(unit, []).append(op_id)
+                for t in range(H):
+                    up_terms: list[Any] = []
+                    for u in units:
+                        if any(a <= t < b for (a, b) in maintenance.get(u, [])):
+                            continue
+                        over = []
+                        for op_id in tasks_by_unit.get(u, []):
+                            dur = task_dur[op_id]
+                            over.append(z3.And(task_start[op_id] <= t,
+                                               task_start[op_id] >= t - dur + 1))
+                        up_terms.append(z3.If(z3.Or(*over), 0, 1) if over else z3.IntVal(1))
+                    available = z3.Sum(up_terms) if up_terms else z3.IntVal(0)
+                    diff = floor - available
+                    shortfall_terms.append(z3.If(diff > 0, diff, 0))
+        stranded = z3.Int("dc_stranded_obj")
+        s.add(stranded == (z3.Sum(shortfall_terms) if shortfall_terms else 0))
+
+        # makespan >= every task end (mirror _dc_build_model + maintenance_makespan's
+        # full-task scope — count unit-unlinked tasks too, or the query disagrees with
+        # the signed leaf).
+        makespan = z3.Int("dc_makespan_obj")
+        if task_end:
+            for e in task_end.values():
+                s.add(makespan >= e)
+            s.add(makespan >= 0)
+        else:
+            s.add(makespan == 0)
+
+        # the two-level lexicographic strict-improvement disjunction.
+        v0, v1 = V
+        s.add(z3.Or(stranded < v0, z3.And(stranded == v0, makespan < v1)))
+        return s
+
+    # ---- white-box helpers for the region-correspondence test (pure, integers) #
+
+    def _pin_to_plan(self, plan: Plan, ir: FCIR) -> list[Any]:
+        """Constrain the FREE ``task_start`` vars of ``_feasibility_only_encode`` to a
+        concrete plan. A concrete plan the closed checker REJECTS becomes UNSAT here (a
+        breached hard rule); a checker-feasible plan stays SAT (the positive control).
+        Pure: returns the assertions, never mutates a solver. The machine is NOT pinned
+        (it is the static path, not a free var); only the start is."""
+        v = self._build_dc_free_vars(ir)
+        task_start = v["task_start"]
+        cons: list[Any] = []
+        for op_id, var in task_start.items():
+            if op_id in plan.assignments:
+                cons.append(var == plan.start(op_id))
+        return cons
+
+    def _decode_witness(self, model: "z3.ModelRef", ir: FCIR) -> Plan:
+        """Read a Z3 model into a concrete dc ``Plan`` (the SAME shape
+        ``dc_extract_plan`` builds) so a witness is checkable by
+        ``feasible.checker.checker.check`` without trusting the encoding. Each
+        ``task:<id>`` op's machine is its STATIC ``task_path`` (the singleton eligible
+        path — NOT a free var, so it is read from the static link, never a model
+        bool); no cleanouts are emitted (the dc outage mechanism is the task ops
+        themselves, so there are no materialized intervals to emit garbage for —
+        Tightening #3 is vacuously satisfied)."""
+        v = self._build_dc_free_vars(ir)
+        task_start, task_path = v["task_start"], v["task_path"]
+        assignments: dict[str, tuple[int, str]] = {}
+        for op_id, var in task_start.items():
+            st = model.eval(var, model_completion=True).as_long()
+            assignments[op_id] = (st, task_path[op_id])
+        return Plan(assignments=assignments, cleanouts=[])
+
+    def _block_model(self, model: "z3.ModelRef") -> Any:
+        """Negate a model over its decision vars so the caller can enumerate DISTINCT
+        witnesses (``s.add(_block_model(m))`` forbids re-finding it)."""
+        terms = []
+        for d in model.decls():
+            val = model[d]
+            if val is not None and d.arity() == 0:
+                terms.append(d() != val)
+        return z3.Or(*terms) if terms else z3.BoolVal(False)
 
     def compile(self, ir: FCIR, model: Any = None) -> tuple[cp_model.CpModel, DcVarIndex]:
         """Build the datacenter CP-SAT model + var index (Task 7). CODE-DISJOINT from
