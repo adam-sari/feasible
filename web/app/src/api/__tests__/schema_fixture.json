@@ -1,0 +1,53 @@
+{
+  "CertifyResult": [
+    "domain_id",
+    "plan_cert",
+    "rule_pack_cert",
+    "trust_vector"
+  ],
+  "CertsView": [
+    "domain_id",
+    "plan_cert",
+    "rule_pack_cert"
+  ],
+  "ConstraintsView": [
+    "domain_id",
+    "draft",
+    "dropped",
+    "rules"
+  ],
+  "InputsView": [
+    "domain_id",
+    "groups",
+    "jobs",
+    "machines",
+    "operations",
+    "units"
+  ],
+  "ScenarioInfo": [
+    "data",
+    "display_name",
+    "domain_id"
+  ],
+  "TimelineView": [
+    "capacity_series",
+    "domain_id",
+    "intervals",
+    "lanes",
+    "threshold_lines"
+  ],
+  "TrustVector": [
+    "checker",
+    "conflict_replay",
+    "coverage",
+    "data",
+    "signature",
+    "signer_note"
+  ],
+  "VerifyView": [
+    "ok",
+    "reasons",
+    "signer_note",
+    "trust_vector"
+  ]
+}

@@ -1,0 +1,9 @@
+[
+  "/api/certificates/{domain_id}",
+  "/api/certify/{domain_id}",
+  "/api/constraints/{domain_id}",
+  "/api/inputs/{domain_id}",
+  "/api/scenarios",
+  "/api/timeline/{domain_id}",
+  "/api/verify"
+]
