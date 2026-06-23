@@ -1,0 +1,88 @@
+"""The datacenter solve path (Task 7) — CP-SAT staged lexicographic search.
+
+``dc_solve`` builds the datacenter CP-SAT model via ``DatacenterVerifier.compile``
+(the SINGLE CP-SAT source the dc solve path uses — code-disjoint from the checker),
+runs the STAGED lexicographic search (minimize stranded power, freeze it as a hard
+bound, then minimize makespan), extracts a byte-deterministic ``Plan`` via
+``dc_extract_plan``, and sets ``result.objective = verifier.objective(ir, plan)`` —
+the REAL ``(stranded_power_kw, makespan)`` tuple recomputed SOLVER-FREE from the
+extracted plan + instance (NO FJSP ``recompute_objective``, NO objective-slot
+encoding). ``verify_plan_cert`` recomputes the SAME via the Spec 0.5
+``verifier.objective`` seam (Spec 0.5 T1) -> equal by construction.
+
+The stranded-power / makespan recompute is the SAME helper (``verifier.stranded_power``
+/ ``verifier.maintenance_makespan`` via ``verifier.objective`` -> ``dc_objective``)
+that ``kpi.py`` (Task 8) reuses, so the signed objective leaf and the KPI surface
+agree.
+
+B-11 (determinism precondition for the Task-12 golden): ``dc_extract_plan`` is
+byte-deterministic — ``dc_solve(workers=1, seed=1)`` twice yields byte-equal plans.
+Single-worker + seeded + sorted extraction pins extraction byte-stability.
+"""
+from __future__ import annotations
+
+from ortools.sat.python import cp_model
+
+from feasible.domains import get_domain
+from feasible.domains.datacenter.verifier import DcVarIndex
+from feasible.ir.domain import FCIR, Plan
+from feasible.solve.orchestrate import SolveResult
+
+
+def _stage_solve(
+    m: cp_model.CpModel, solver: cp_model.CpSolver, vi: DcVarIndex
+) -> int:
+    """Staged lexicographic solve: minimize stranded power, freeze it as a hard
+    bound, then minimize makespan. Returns the final CP-SAT status."""
+    assert vi.stranded is not None and vi.makespan is not None
+    m.minimize(vi.stranded)
+    status1 = solver.solve(m)
+    if status1 not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return status1
+    best_stranded = int(solver.value(vi.stranded))
+    m.add(vi.stranded == best_stranded)  # freeze level 1
+    m.minimize(vi.makespan)  # replaces the objective
+    return solver.solve(m)
+
+
+def dc_extract_plan(solver: cp_model.CpSolver, vi: DcVarIndex) -> Plan:
+    """Read the solved maintenance-task starts into a frozen ``Plan`` DETERMINISTICALLY.
+
+    Every instance op is a ``task:<id>`` maintenance task on its path machine; its
+    start is the solved schedulable decision. Assignments are built in SORTED op_id
+    order (a dict preserves insertion order; byte-stability comes from sorting) so the
+    extraction is byte-deterministic (B-11). No cleanouts (the full-facility outage
+    mechanism is the task ops themselves, not plan_outage cleanouts)."""
+    assert vi.ir is not None
+    assignments: dict[str, tuple[int, str]] = {}
+    for op in sorted(vi.ir.instance.operations, key=lambda o: o.op_id):
+        start = int(solver.value(vi.task_start[op.op_id]))
+        assignments[op.op_id] = (start, vi.task_path[op.op_id])
+    return Plan(assignments=assignments, cleanouts=[])
+
+
+def dc_solve(
+    ir: FCIR, max_seconds: float = 30.0, *, workers: int = 1, seed: int = 1
+) -> SolveResult:
+    """Solve the datacenter active set ``ir`` for the certified plan.
+
+    Builds the model via the verifier's ``compile`` (the single CP-SAT source),
+    runs the staged lexicographic search, extracts a byte-deterministic plan, and
+    sets ``result.objective = verifier.objective(ir, plan)`` (the REAL
+    ``(stranded_power_kw, makespan)`` tuple, recomputed solver-free). Single-worker
+    + seeded by default so extraction is byte-stable (B-11)."""
+    _, verifier = get_domain("datacenter")
+    m, vi = verifier.compile(ir, None)
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = max_seconds
+    solver.parameters.num_search_workers = workers
+    solver.parameters.random_seed = seed
+    status = _stage_solve(m, solver, vi)
+    status_name = solver.status_name(status)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return SolveResult(plan=None, status=status_name, objective=None, gap=None)
+    plan = dc_extract_plan(solver, vi)
+    # the REAL objective, recomputed SOLVER-FREE via the Spec 0.5 objective seam.
+    objective = verifier.objective(ir, plan)
+    gap = 0.0 if status == cp_model.OPTIMAL else None
+    return SolveResult(plan=plan, status=status_name, objective=objective, gap=gap)

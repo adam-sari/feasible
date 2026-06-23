@@ -6,8 +6,10 @@ Task 3 adds:  ``dc:maintenance_window`` (PLAN-DEPENDENT evaluated — a schedule
               maintenance task overlapping a forbidden window on its path).
 """
 from __future__ import annotations
+from dataclasses import dataclass, field
 from typing import Any
 import z3
+from ortools.sat.python import cp_model
 from pydantic import BaseModel
 from feasible.checker.coverage_floor import coverage_floor_violations, coverage_floor_z3
 from feasible.checker.result import Violation
@@ -579,6 +581,272 @@ def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]
     return "?", 1 << 30, 0, {}
 
 
+# --------------------------------------------------------------------------- #
+# Objective / KPI recompute helpers (Task 7) — the SINGLE source of the real  #
+# (stranded_power_kw, makespan) tuple the cert's signed objective carries AND  #
+# (Task 8) the kpi.py recompute fns reuse, so the objective leaf and the KPI   #
+# surface agree. Solver-free, INTEGERS ONLY, recomputed from signed plan+inst. #
+# --------------------------------------------------------------------------- #
+
+
+def stranded_power(ir: FCIR, plan: Plan) -> int:
+    """The redundancy SHORTFALL below the N+1 floor, summed over EVERY active group
+    AND timestep: ``sum_g sum_t max(0, floor_g - available_{g,t})``. 0 when every
+    floor holds; positive for a buffer-spending plan. Gated on the SAME
+    ``_active_redundancy_group`` predicate as the checker/mirror (an INACTIVE group
+    never strands power). Solver-free; reads params TOTALLY (fail-closed)."""
+    total = 0
+    for _gid, floor, horizon, avail in _redundancy_groups_available(plan, ir):
+        total += sum(max(0, floor - avail.get(t, 0)) for t in range(horizon))
+    return total
+
+
+def maintenance_makespan(ir: FCIR, plan: Plan) -> int:
+    """The last maintenance END over the plan: the latest of (a) a PLAN-scheduled
+    maintenance TASK end (``task:<id>`` op start + its instance duration) and (b) a
+    legacy ``plan_outage:`` cleanout end. 0 when nothing is scheduled. Solver-free;
+    TOTAL (a task absent from the plan / op missing is skipped, never a KeyError)."""
+    ends: list[int] = []
+    # task-outage mechanism (the full facility): every maintenance-task interval.
+    for intervals in _task_outage_intervals(plan, ir).values():
+        ends.extend(b for (_a, b) in intervals)
+    # legacy slice: plan_outage cleanout ends.
+    ends.extend(
+        ce for (_mc, _cs, ce, reason) in plan.cleanouts
+        if str(reason).startswith("plan_outage:")
+    )
+    return max(ends, default=0)
+
+
+def dc_objective(ir: FCIR, plan: Plan) -> tuple[int, ...]:
+    """The REAL ``(stranded_power_kw, makespan)`` lexicographic objective tuple,
+    recomputed solver-free from the signed plan+instance. ``verifier.objective``
+    delegates here; ``dc_solve`` sets ``result.objective`` to this SAME tuple after
+    extraction, so ``verify`` (which recomputes via the Spec 0.5 ``verifier.objective``
+    seam) matches by construction."""
+    return (stranded_power(ir, plan), maintenance_makespan(ir, plan))
+
+
+# --------------------------------------------------------------------------- #
+# CP-SAT compile (Task 7) — CODE-DISJOINT from the checker                     #
+# --------------------------------------------------------------------------- #
+# The datacenter solve path schedules each maintenance task's START over the
+# integer time grid. The checker NEVER imports these CP-SAT vars; this model
+# NEVER imports the checker's Violation/coverage_floor kernel — the two are
+# code-disjoint (the checker re-derives availability from the plan; the model
+# constrains it during search). Forbidden windows (dc:maintenance_window), the
+# per-timestep redundancy floor (dc:redundancy_floor), and the STRUCTURAL caps
+# (dc:power_cap/dc:anti_affinity as fixed feasibility checks) are encoded as
+# constraints; the lexicographic objective (stranded power then makespan) is the
+# solver's business. INTEGERS ONLY (no float anywhere in the model).
+
+
+@dataclass
+class DcVarIndex:
+    """The datacenter CP-SAT variable index. ``task_start``/``task_end`` are the
+    schedulable maintenance-task vars (op_id ``task:<id>``); ``task_unit`` maps a
+    task op to the redundancy unit it derates (if any); ``avail`` holds the
+    per-(group, timestep) availability var; ``stranded``/``makespan`` are the two
+    lexicographic objective vars."""
+
+    task_start: dict[str, cp_model.IntVar] = field(default_factory=dict)
+    task_end: dict[str, cp_model.IntVar] = field(default_factory=dict)
+    task_path: dict[str, str] = field(default_factory=dict)
+    task_unit: dict[str, str] = field(default_factory=dict)
+    avail: dict[tuple[str, int], cp_model.IntVar] = field(default_factory=dict)
+    stranded: cp_model.IntVar | None = None
+    makespan: cp_model.IntVar | None = None
+    horizon: int = 0
+    ir: FCIR | None = None
+
+
+def _maintenance_task_links(ir: FCIR) -> dict[str, tuple[str, int, str | None]]:
+    """``task:<id>`` op_id -> (path, duration, unit) from the facility block's
+    ``maintenance_tasks`` linkage (TOTAL: a task with no facility entry / no op is
+    skipped). The duration comes from the packed Operation (authoritative)."""
+    facility = _facility_block(ir)
+    tasks = facility.get("maintenance_tasks", [])
+    op_duration = {op.op_id: int(op.duration) for op in ir.instance.operations}
+    out: dict[str, tuple[str, int, str | None]] = {}
+    if not isinstance(tasks, list):
+        return out
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        op_id = f"task:{t.get('id')}"
+        if op_id not in op_duration:
+            continue
+        path = str(t.get("path", ""))
+        unit = t.get("unit")
+        out[op_id] = (path, op_duration[op_id], None if unit is None else str(unit))
+    return out
+
+
+def _dc_build_model(ir: FCIR) -> tuple[cp_model.CpModel, DcVarIndex]:
+    """Build the datacenter CP-SAT model. CODE-DISJOINT from the checker.
+
+    Decision vars: each maintenance-task start over ``[0, horizon - duration]``.
+    Constraints:
+      * dc:maintenance_window (active) — ``Or(end <= fa, start >= fb)`` per forbidden
+        window on the task's path (a task may not overlap a change-freeze window).
+      * dc:redundancy_floor (active) — per group, per timestep, ``available_t >=
+        floor`` where ``available_t`` = installed units minus (fixed-maintenance-down
+        + task-derated-down). A task derates its linked unit while running.
+      * dc:power_cap / dc:anti_affinity (active structural) — FIXED feasibility checks:
+        the v1 draws/placements are instance facts, so a breach makes the model
+        infeasible (the checker also flags it; the compile must not optimize against a
+        structurally-broken instance).
+    Objective vars: ``stranded`` (the per-timestep redundancy shortfall, == 0 when the
+    floor is a hard constraint and the model is feasible) and ``makespan`` (the last
+    task end). The staged lexicographic search lives in ``dc_solve``."""
+    m = cp_model.CpModel()
+    H = ir.instance.horizon
+    vi = DcVarIndex(horizon=H, ir=ir)
+
+    links = _maintenance_task_links(ir)
+    for op_id, (path, dur, unit) in sorted(links.items()):
+        s = m.new_int_var(0, max(0, H - dur), f"dc_start_{op_id}")
+        e = m.new_int_var(0, H, f"dc_end_{op_id}")
+        m.add(e == s + dur)
+        vi.task_start[op_id] = s
+        vi.task_end[op_id] = e
+        vi.task_path[op_id] = path
+        if unit is not None:
+            vi.task_unit[op_id] = unit
+
+    # --- dc:maintenance_window (active): a task on a path must avoid forbidden windows.
+    for r in ir.rules:
+        if r.rule_id != "dc:maintenance_window" or not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        path_id = str(p.get("path_id", ""))
+        forbidden = [(int(a), int(b)) for (a, b) in p.get("forbidden", [])]
+        for op_id, op_path in vi.task_path.items():
+            if op_path != path_id:
+                continue
+            s, e = vi.task_start[op_id], vi.task_end[op_id]
+            for k, (fa, fb) in enumerate(forbidden):
+                # disjoint from [fa,fb): end <= fa OR start >= fb. Reify each side.
+                before = m.new_bool_var(f"dc_mw_before_{op_id}_{k}")
+                after = m.new_bool_var(f"dc_mw_after_{op_id}_{k}")
+                m.add(e <= fa).only_enforce_if(before)
+                m.add(s >= fb).only_enforce_if(after)
+                m.add_bool_or([before, after])
+
+    # --- dc:redundancy_floor (active): per-group per-timestep availability >= floor.
+    # A unit is DOWN at t if (a) a FIXED instance maintenance interval covers t, or
+    # (b) a maintenance task linked to that unit runs over t. installed - down >= floor.
+    if _has_active_redundancy_group(ir):
+        for r in _active_redundancy_groups(ir):
+            p = r.params
+            gid = str(p.get("group_id", "?"))
+            units = [str(u) for u in p.get("units", [])]
+            floor = int(p.get("floor", 1 << 30))
+            maintenance = p.get("maintenance", {})
+            # tasks derating each unit in THIS group.
+            tasks_by_unit: dict[str, list[str]] = {}
+            for op_id, unit in vi.task_unit.items():
+                if unit in units:
+                    tasks_by_unit.setdefault(unit, []).append(op_id)
+            for t in range(H):
+                up_terms: list[cp_model.IntVar | int] = []
+                for u in units:
+                    fixed_down = any(a <= t < b for (a, b) in maintenance.get(u, []))
+                    if fixed_down:
+                        continue  # a fixed outage removes the unit -> contributes 0 up
+                    # the unit is up at t unless a linked task runs over t.
+                    task_over = []
+                    for op_id in tasks_by_unit.get(u, []):
+                        s = vi.task_start[op_id]
+                        # task runs over t iff start <= t < start + dur, i.e.
+                        # start <= t AND start >= t - dur + 1. Reify each half so b
+                        # is the exact conjunction (b <=> le AND ge).
+                        dur = links[op_id][1]
+                        le = m.new_bool_var(f"dc_le_{op_id}_{t}")
+                        ge = m.new_bool_var(f"dc_ge_{op_id}_{t}")
+                        m.add(s <= t).only_enforce_if(le)
+                        m.add(s > t).only_enforce_if(le.Not())
+                        m.add(s >= t - dur + 1).only_enforce_if(ge)
+                        m.add(s < t - dur + 1).only_enforce_if(ge.Not())
+                        b = m.new_bool_var(f"dc_over_{op_id}_{t}")
+                        m.add_bool_and([le, ge]).only_enforce_if(b)
+                        m.add_bool_or([le.Not(), ge.Not()]).only_enforce_if(b.Not())
+                        task_over.append(b)
+                    if task_over:
+                        # up_u == 1 iff NO linked task runs over t.
+                        up_u = m.new_bool_var(f"dc_up_{gid}_{u}_{t}")
+                        m.add(sum(task_over) == 0).only_enforce_if(up_u)
+                        m.add(sum(task_over) >= 1).only_enforce_if(up_u.Not())
+                        up_terms.append(up_u)
+                    else:
+                        up_terms.append(1)
+                avail = m.new_int_var(0, len(units), f"dc_avail_{gid}_{t}")
+                m.add(avail == sum(up_terms))
+                m.add(avail >= floor)
+                vi.avail[(gid, t)] = avail
+
+    # --- dc:power_cap (active structural): FIXED feasibility check (v1 draws fixed).
+    for r in ir.rules:
+        if r.rule_id != "dc:power_cap" or not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        scope = [str(u) for u in p.get("scope_units", [])]
+        cap_kw = int(p.get("cap_kw", 0))
+        per_member_pct = int(p.get("per_member_pct", 0))
+        draws = p.get("draws", {})
+        aggregate = sum(int(draws.get(u, cap_kw)) for u in scope)
+        # constant booleans: an infeasible structural invariant makes the model UNSAT.
+        m.add(int(aggregate <= cap_kw) == 1)
+        for u in scope:
+            du = int(draws.get(u, cap_kw))
+            m.add(int(100 * du <= per_member_pct * cap_kw) == 1)
+
+    # --- dc:anti_affinity (active structural): FIXED feasibility check (v1 placement).
+    for r in ir.rules:
+        if r.rule_id != "dc:anti_affinity" or not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        replicas = [str(u) for u in p.get("replicas", [])]
+        fault_domain_of = p.get("fault_domain_of", {})
+        for i in range(len(replicas)):
+            for j in range(i + 1, len(replicas)):
+                fd1 = fault_domain_of.get(replicas[i], _MISSING)
+                fd2 = fault_domain_of.get(replicas[j], _MISSING)
+                collide = (fd1 is _MISSING) or (fd2 is _MISSING) or (fd1 == fd2)
+                m.add(int(not collide) == 1)  # a collision makes the model UNSAT
+
+    # --- objective vars.
+    # stranded: per-(group, timestep) shortfall below the floor. With the floor as a
+    # hard constraint above, this is identically 0 on any feasible model; the var is
+    # carried so the lexicographic search has a level-1 objective the extracted plan's
+    # solver-free recompute (verifier.objective) reproduces exactly.
+    shortfall_terms: list[cp_model.IntVar] = []
+    for r in _active_redundancy_groups(ir):
+        gid = str(r.params.get("group_id", "?"))
+        floor = int(r.params.get("floor", 0))
+        for t in range(H):
+            avail_var = vi.avail.get((gid, t))
+            if avail_var is None:
+                continue
+            sf = m.new_int_var(0, floor, f"dc_short_{gid}_{t}")
+            m.add(sf >= floor - avail_var)
+            shortfall_terms.append(sf)
+    stranded = m.new_int_var(0, (1 << 30), "dc_stranded")
+    m.add(stranded == (sum(shortfall_terms) if shortfall_terms else 0))
+    vi.stranded = stranded
+
+    # makespan: the last maintenance-task end (0 when no task).
+    makespan = m.new_int_var(0, H, "dc_makespan")
+    if vi.task_end:
+        for e in vi.task_end.values():
+            m.add(makespan >= e)
+    else:
+        m.add(makespan == 0)
+    vi.makespan = makespan
+
+    return m, vi
+
+
 class DatacenterVerifier:
     domain_id: str = "datacenter"
     # rule_kinds: the PLAN-DEPENDENT evaluated kinds + the STRUCTURAL kinds (B-4).
@@ -644,19 +912,18 @@ class DatacenterVerifier:
     objective_labels: tuple[str, ...] = ("stranded_power_kw", "makespan")
 
     def objective(self, ir: FCIR, plan: Plan) -> tuple[int, ...]:
-        # spike proxy (Task 7 generalizes to real stranded kW over the full facility):
-        # stranded_power_kw = sum_t max(0, floor - available_t) — the per-timestep
-        # redundancy SHORTFALL below the N+1 floor (0 when the floor holds, positive
-        # for a buffer-spending plan); makespan = last plan-scheduled outage end (0 when
-        # none). Both solver-free non-negative integers from the signed plan+instance.
-        gid, floor, horizon, avail = _available_by_t(plan, ir)
-        stranded = sum(max(0, floor - avail[t]) for t in range(horizon))
-        makespan = max(
-            [ce for (_mc, _cs, ce, reason) in plan.cleanouts
-             if str(reason).startswith("plan_outage:")],
-            default=0,
-        )
-        return (stranded, makespan)
+        # The REAL datacenter objective over the FULL facility (Task 7 generalizes the
+        # Task-0 single-group spike). Both levels are solver-free non-negative integers
+        # recomputed from the signed plan+instance — NO floats, NO solver state.
+        #   * stranded_power_kw = the redundancy SHORTFALL below the N+1 floor summed
+        #     over EVERY active group AND timestep (sum_g sum_t max(0, floor_g -
+        #     available_{g,t})). 0 when every floor holds; positive for a
+        #     buffer-spending plan. The SAME quantity the kpi.py recompute (Task 8) and
+        #     the cert's signed objective leaf carry (one helper -> consistent).
+        #   * makespan = the last maintenance-task end (the task-outage mechanism), or
+        #     the last plan_outage cleanout end for the legacy slice — whichever is
+        #     later. 0 when no task/outage is scheduled.
+        return dc_objective(ir, plan)
 
     def optimality_tripwire(self, ir: FCIR, objective: tuple[int, ...]) -> bool:
         # the dc objective is solver-reported, not Z3-attested optimal -> opt out
@@ -664,9 +931,13 @@ class DatacenterVerifier:
         # asserts len==2). Task 9 binds the trust_boundary note.
         return False
 
-    # Protocol stubs filled by later tasks:
-    def compile(self, ir: Any, model: Any = None) -> Any:
-        raise NotImplementedError
+    def compile(self, ir: FCIR, model: Any = None) -> tuple[cp_model.CpModel, DcVarIndex]:
+        """Build the datacenter CP-SAT model + var index (Task 7). CODE-DISJOINT from
+        the checker (this module never imports the checker's coverage_floor kernel; the
+        checker never imports these CP-SAT vars). ``model`` is accepted for Protocol
+        parity (the manufacturing seam takes a model); the datacenter path builds its
+        own ``CpModel`` and returns it."""
+        return _dc_build_model(ir)
 
     def kpis(self) -> list[Any]:
         return []
