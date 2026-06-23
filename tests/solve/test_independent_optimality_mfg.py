@@ -15,13 +15,26 @@ Two halves:
      (b) NOT-TOO-TIGHT — the optimum is in-region;
      (c) the 3-chain changeover is the IMMEDIATE-ADJACENCY sum (no every-pair
          over-count) — a FEASIBLE plan (RE-HOMED here per RC-5/F2), pinned to the
-         FEASIBILITY-ONLY layer (SAT) with its ``co`` asserted == the canonical
-         consecutive-pair recompute;
+         FEASIBILITY-ONLY layer (SAT) with the ENCODING'S ``co`` expression read
+         straight out of a Z3 model (``_changeover_expr_value`` — NOT a Python
+         recompute) and asserted == the canonical consecutive-pair sum and STRICTLY
+         less than the every-ordered-pair over-count, so an every-pair regression
+         (which would change the SHARED ``_changeover_expr``) is CAUGHT;
      (d) EXCLUDES-CHECKER-INFEASIBLE — pin CONSTRUCTED checker-REJECTED adversaries
-         (maintenance-straddle cleanout, night-only cleanout) to the
-         FEASIBILITY-ONLY layer (RC-1, no objective confound) -> UNSAT on the
+         to the FEASIBILITY-ONLY layer (RC-1, no objective confound) -> UNSAT on the
          specific breached rule_id, PLUS a POSITIVE CONTROL (known-feasible plan
-         -> SAT) so the test cannot pass vacuously.
+         -> SAT) so the test cannot pass vacuously. THREE adversaries, each isolating
+         exactly ONE must-fix on the only instance where that rule is INDEPENDENTLY
+         load-bearing:
+           - night-only cleanout (R-6.1-NIGHT-CLEANOUT)        -> isolates #6;
+           - DAY-band maintenance-straddle on a DAY-2 Labeler window [1840,1940)
+             whose straddling cleanout has minute-of-day 440 (DAY-valid, so #6 does
+             NOT fire) -> isolates #3 (the cleanout-maint-disjointness on ``cs``);
+             a discrimination probe confirms dropping #3 alone flips this to SAT;
+           - the original night-window maintenance-straddle (R-MAINT) is retained as
+             a belt-and-braces adversary even though on the sole demo window #6
+             subsumes #3 (which is WHY the day-2 window above exists — to give #3 an
+             independent witness).
 """
 from __future__ import annotations
 
@@ -129,14 +142,44 @@ def _expected_immediate_adjacency_co(ir) -> int:
     return total_changeover_time(ir, _three_chain_feasible_plan(ir))
 
 
+def _every_ordered_pair_co(ir, plan) -> int:
+    """The WRONG every-ordered-same-machine-pair changeover sum (the over-count the
+    encoding must NOT compute). On Allergen->Standard->Spicy this charges all THREE
+    ordered pairs — Allergen->Standard (90), Allergen->Spicy (90), Standard->Spicy
+    (0) = 180 — where the correct immediate-adjacency cost is only 90. The
+    regression value the discriminating leg (c) proves the encoding's ``co`` is NOT
+    equal to."""
+    inst = ir.instance
+
+    def fam(opid: str) -> str:
+        return inst.job(inst.operation(opid).job_id).family
+
+    total = 0
+    for mc in inst.machines:
+        on_mc = [
+            opid for opid, (_st, m) in plan.assignments.items() if m == mc
+        ]
+        for i_id in on_mc:
+            for j_id in on_mc:
+                if i_id == j_id:
+                    continue
+                if plan.start(i_id) < plan.start(j_id):  # every ORDERED same-machine pair
+                    total += inst.setup(fam(i_id), fam(j_id))
+    return total
+
+
 def _maintenance_straddle_plan(ir) -> Plan:
-    """A complete checker-FEASIBLE-SHAPE plan whose ONLY rule breach is a
-    MATERIALIZED cleanout STRADDLING the Filler-2 [1200,1440) maintenance window
-    (J1-fill Allergen immediately before J2-fill Standard on Filler-2). Routing,
-    no-overlap and setup are all satisfied — the cleanout straddle is the sole
-    breach. Because the [1200,1440) window sits at a NIGHT minute-of-day in this
-    instance, the straddle is unavoidably ALSO a night breach; the test cites
-    ``R-MAINT`` (which the must-fix #3 materialized-disjointness assertion owns)."""
+    """A complete checker-FEASIBLE-SHAPE plan whose cleanout STRADDLES the Filler-2
+    [1200,1440) maintenance window (J1-fill Allergen immediately before J2-fill
+    Standard on Filler-2). The checker cites ``R-MAINT`` for the straddle.
+
+    HONESTY (concern-2 fix): on the SOLE demo maintenance window [1200,1440) — which
+    sits ENTIRELY in the night band [960,1440) — any straddling cleanout necessarily
+    has a NIGHT minute-of-day, so this adversary's UNSAT is OVER-DETERMINED (it trips
+    BOTH must-fix #3 AND #6). It therefore does NOT independently isolate #3. The
+    INDEPENDENT #3 witness is ``_day_band_straddle_plan`` on a DAY-2 Labeler window
+    whose straddling cleanout is DAY-valid (#6 cannot fire). This plan is retained as
+    a belt-and-braces R-MAINT adversary, not as the #3 discriminator."""
     a: dict[str, tuple[int, str]] = {
         # the J1(Allergen) -> J2(Standard) chain routed around the maintenance window
         "J1-mix": (1100, "Mixer-B"), "J1-fill": (1150, "Filler-2"), "J1-label": (1500, "Labeler"),
@@ -191,6 +234,80 @@ def _constructed_infeasible_plans(ir):
 
 
 # --------------------------------------------------------------------------- #
+# Day-band straddle: the INDEPENDENT #3 witness (concern-2 fix).               #
+#                                                                             #
+# The sole demo maintenance window [1200,1440) is entirely at night, so a     #
+# straddling cleanout trips #6 too (over-determined). To give must-fix #3     #
+# (cleanout-maint-disjointness on `cs`) an INDEPENDENT witness, add a DAY-2   #
+# Labeler maintenance window [1840,1940) (minutes 400-500 of day 2). A        #
+# cleanout straddling it at minute-of-day 440 is DAY-VALID — so #6 CANNOT     #
+# fire and the only rule that excludes the straddle is #3.                    #
+# --------------------------------------------------------------------------- #
+
+_DAY2_MAINT = ("Labeler", 1840, 1940)   # minutes 400-500 of day 2
+
+
+def _day_band_maint_ir(ir):
+    """A deep copy of ``ir`` with an ADDED day-band Labeler maintenance window so a
+    straddling cleanout can sit at a DAY minute-of-day. The encoding reads
+    ``inst.maintenance`` so the extra window is picked up automatically; the demo
+    scenario itself is untouched (the copy is test-local)."""
+    mod = ir.model_copy(deep=True)
+    mod.instance.maintenance = list(mod.instance.maintenance) + [_DAY2_MAINT]
+    return mod
+
+
+def _day_band_assign() -> dict[str, tuple[int, str]]:
+    """Shared mix/fill layout for the day-2 fixtures: family-isolated, all well
+    before any maintenance window, no cross-family adjacency off the Labeler."""
+    return {
+        "J1-mix": (0, "Mixer-B"), "J5-mix": (40, "Mixer-B"),
+        "J2-mix": (0, "Mixer-A"), "J3-mix": (40, "Mixer-A"),
+        "J4-mix": (80, "Mixer-A"), "J6-mix": (120, "Mixer-A"),
+        "J1-fill": (100, "Filler-2"), "J5-fill": (130, "Filler-2"),
+        "J2-fill": (100, "Filler-1"), "J3-fill": (130, "Filler-1"),
+        "J4-fill": (160, "Filler-1"), "J6-fill": (190, "Filler-1"),
+    }
+
+
+def _day_band_straddle_plan(ir) -> Plan:
+    """The INDEPENDENT must-fix #3 adversary: a complete checker-FEASIBLE-SHAPE plan
+    whose ONLY breach is a materialized cleanout STRADDLING the DAY-2 Labeler window
+    [1840,1940). The cleanout [1880,1970) has minute-of-day 1880%1440 = 440, which is
+    DAY-VALID (440 >= 0 and 440+90 <= 960) -> the night band (#6) does NOT fire -> the
+    checker cites ONLY ``R-MAINT`` and the feasibility-only encoding's UNSAT is
+    attributable to #3 ALONE. The sole Labeler setup adjacency is J1(Allergen)->
+    J3(Standard); the tail order J3->J4->J2->J6->J5 has no further Allergen->Std/Spicy
+    immediate pair (every other consecutive transition is 0-cost)."""
+    a = _day_band_assign()
+    a["J1-label"] = (1700, "Labeler")   # ends 1810 (before window 1840)
+    a["J3-label"] = (1970, "Labeler")   # ends 2060 (after the straddling cleanout)
+    a["J4-label"] = (2060, "Labeler")   # Std->Spicy = 0
+    a["J2-label"] = (2140, "Labeler")   # Spicy->Std = 0
+    a["J6-label"] = (2240, "Labeler")   # Std->Std = 0
+    a["J5-label"] = (2310, "Labeler")   # Std->Allergen = 0; J5 last -> no A->Std after it
+    cleanouts = [("Labeler", 1880, 1970, "cleanout J1-label->J3-label")]  # straddles [1840,1940)
+    return Plan(assignments=a, cleanouts=cleanouts)
+
+
+def _day_band_control_plan(ir) -> Plan:
+    """The POSITIVE CONTROL for the day-2 fixture: the SAME shape as the straddle but
+    with the J1->J3 cleanout placed in a clean DAY slot [1610,1700) that does NOT
+    overlap the [1840,1940) window. Checker-FEASIBLE -> SAT, proving the day-2 pins
+    are admissible (so the straddle's UNSAT is a real #3 exclusion, not a pin
+    artefact)."""
+    a = _day_band_assign()
+    a["J1-label"] = (1500, "Labeler")   # ends 1610
+    a["J3-label"] = (1700, "Labeler")   # ends 1790 (before window 1840)
+    a["J4-label"] = (1940, "Labeler")   # resumes after the window; ends 2020
+    a["J2-label"] = (2020, "Labeler")
+    a["J6-label"] = (2120, "Labeler")
+    a["J5-label"] = (2190, "Labeler")
+    cleanouts = [("Labeler", 1610, 1700, "cleanout J1-label->J3-label")]  # clean DAY slot
+    return Plan(assignments=a, cleanouts=cleanouts)
+
+
+# --------------------------------------------------------------------------- #
 # (a) NOT-LARGER — sampled decoded witnesses are checker-feasible (RC-2).      #
 # --------------------------------------------------------------------------- #
 
@@ -240,8 +357,23 @@ def test_three_chain_changeover_is_not_over_counted():
     s_feas, _vars = verifier._feasibility_only_encode(ir)
     s_feas.add(verifier._pin_to_plan(three_chain, ir))   # pin to the FEASIBILITY-ONLY layer
     assert s_feas.check() == z3.sat                       # a feasible plan IS in the region
-    co_val = verifier._changeover_of(three_chain, ir)    # the encoding's immediate-adjacency co
-    assert co_val == _expected_immediate_adjacency_co(ir)  # consecutive-pair sum, NOT the over-count
+
+    # DISCRIMINATING: read the ENCODING'S `co` expression (Sum(If(adj(i,j,mc), req,
+    # 0))) straight out of a Z3 model — NOT a Python recompute. The Labeler order is
+    # the 3-chain Allergen(J1)->Standard(J3)->Spicy(J4) then J2(Std), J5(A), J6(Std):
+    # its IMMEDIATE adjacencies are J1->J3 (Allergen->Standard=90) and J5->J6
+    # (Allergen->Standard=90) — every other consecutive pair is 0 (Std->Spicy,
+    # Spicy->Std, Std->Allergen) — for a correct immediate-adjacency cost of 180. An
+    # every-ordered-pair over-count would ALSO charge the NON-adjacent
+    # Allergen->Standard/Spicy pairs (e.g. J1->J4, J1->J2, J1->J6, J5 vs the earlier
+    # Standards), inflating the sum to 450. Because `_changeover_expr_value` evals the
+    # very `co` term the cert ships (with its immediate-adjacency `adj` guard), a
+    # regression to the every-pair sum WOULD flip this assertion (450 != 180).
+    co_from_encoding = verifier._changeover_expr_value(three_chain, ir)
+    assert co_from_encoding == _expected_immediate_adjacency_co(ir)   # == total_changeover_time
+    over_count = _every_ordered_pair_co(ir, three_chain)  # the regression value the encoding rejects
+    assert over_count > co_from_encoding                  # the over-count is STRICTLY larger (450 > 180)
+    assert co_from_encoding != over_count                 # the encoding does NOT over-count
 
 
 # --------------------------------------------------------------------------- #
@@ -269,3 +401,47 @@ def test_encoding_excludes_constructed_checker_infeasible_plans():
         s_feas, _ = verifier._feasibility_only_encode(ir)   # FEASIBILITY-ONLY layer (no objective)
         s_feas.add(verifier._pin_to_plan(bad_plan, ir))     # pin start/mp/cs to the bad plan
         assert s_feas.check() == z3.unsat                    # the hard-constraint region EXCLUDES it
+
+    # #6 ISOLATION: the night-only adversary's SOLE breach is the night band — it does
+    # NOT also trip R-MAINT (its cleanout is on the maintenance-free Labeler), so its
+    # UNSAT is attributable to #6 ALONE (not over-determined by a maintenance straddle).
+    night_only = _night_only_plan(ir)
+    night_viols = {v.rule_id for v in check(night_only, ir).violations}
+    assert night_viols == {"R-6.1-NIGHT-CLEANOUT"}       # exactly #6, nothing else
+
+
+def test_day_band_straddle_independently_isolates_maint_disjointness():
+    # CONCERN-2 FIX: the sole demo window [1200,1440) is entirely at night, so a
+    # straddling cleanout there trips BOTH #3 and #6 (over-determined) — that adversary
+    # cannot independently isolate must-fix #3. This test gives #3 an INDEPENDENT
+    # witness: a DAY-2 Labeler window [1840,1940) whose straddling cleanout sits at
+    # minute-of-day 440 (DAY-valid). The night band (#6) therefore CANNOT fire, so the
+    # checker cites ONLY R-MAINT and the feasibility-only encoding's UNSAT is
+    # attributable to the cleanout-maint-disjointness (#3) ALONE.
+    ir = _day_band_maint_ir(build_scenario_ir())
+    _, verifier = get_domain("manufacturing")
+
+    # POSITIVE CONTROL: the same shape with a CLEAN day cleanout is checker-feasible
+    # and pins SAT (the day-2 pins are admissible -> the straddle UNSAT is real).
+    control = _day_band_control_plan(ir)
+    assert check(control, ir).passed is True
+    s_ctrl, _ = verifier._feasibility_only_encode(ir)
+    s_ctrl.add(verifier._pin_to_plan(control, ir))
+    assert s_ctrl.check() == z3.sat
+
+    # the day-band straddle: checker rejects it for R-MAINT and #6 does NOT fire.
+    straddle = _day_band_straddle_plan(ir)
+    rejected = check(straddle, ir)
+    assert rejected.passed is False
+    viol_ids = {v.rule_id for v in rejected.violations}
+    assert "R-MAINT" in viol_ids                          # the straddle breaches maintenance
+    assert "R-6.1-NIGHT-CLEANOUT" not in viol_ids         # ...and the night band does NOT fire
+    assert viol_ids == {"R-MAINT"}                         # R-MAINT is the SOLE breach
+
+    # the feasibility-only encoding EXCLUDES the straddle (UNSAT), and — because #6
+    # cannot fire here — this UNSAT is attributable to #3 (the cleanout-maint
+    # disjointness on `cs`) ALONE. A discrimination probe (scratchpad) confirms that
+    # dropping ONLY the #3 assertion flips this same pin to SAT.
+    s_feas, _ = verifier._feasibility_only_encode(ir)
+    s_feas.add(verifier._pin_to_plan(straddle, ir))
+    assert s_feas.check() == z3.unsat

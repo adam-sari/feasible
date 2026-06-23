@@ -509,7 +509,7 @@ class ManufacturingVerifier:
             return None
         inst = ir.instance
         s, v = self._feasibility_only_encode(ir)
-        start, end, adj = v["start"], v["end"], v["adj"]
+        end = v["end"]
 
         # wt == priority-weighted tardiness over the free plan
         wt_terms = []
@@ -524,8 +524,7 @@ class ManufacturingVerifier:
 
         # co == immediate-adjacency changeover (NO every-ordered-pair over-count)
         co = z3.Int("co")
-        co_terms = [z3.If(adj(i, j, mc), req, 0) for (i, j, mc, req) in v["setup_pairs"]]
-        s.add(co == (z3.Sum(co_terms) if co_terms else 0))
+        s.add(co == self._changeover_expr(v))
 
         # the two-level lexicographic strict-improvement disjunction (mirror
         # optimality.py:30-37): require SOME strict improvement over V.
@@ -536,6 +535,34 @@ class ManufacturingVerifier:
         return s
 
     # ---- white-box helpers for the region-correspondence test (pure, integers) #
+
+    @staticmethod
+    def _changeover_expr(v: dict[str, Any]) -> Any:
+        """The SINGLE definition of the encoding's ``co`` objective expression over
+        the free vars: ``Sum(If(adj(i,j,mc), req, 0))`` — IMMEDIATE adjacency ONLY,
+        each changeover charged at most once. Used BOTH by
+        ``independent_optimality_encode`` (so the shipped ``co`` is this expression)
+        AND by ``_changeover_expr_value`` (so the region test reads THIS expression,
+        not a Python re-derivation). A regression to an every-ordered-pair sum would
+        therefore change the value the test reads AND the value the cert ships."""
+        adj, setup_pairs = v["adj"], v["setup_pairs"]
+        co_terms = [z3.If(adj(i, j, mc), req, 0) for (i, j, mc, req) in setup_pairs]
+        return z3.Sum(co_terms) if co_terms else z3.IntVal(0)
+
+    def _changeover_expr_value(self, plan: Plan, ir: FCIR) -> int:
+        """Read the ENCODING'S ``co`` expression for a concrete plan straight out of
+        a Z3 model — NOT a Python recompute. Pins ``plan`` to the feasibility-only
+        layer, solves, and evaluates ``_changeover_expr`` (the very expression the
+        cert ships) in the resulting model. This is what makes region-test leg (c)
+        DISCRIMINATING: it exercises the ``Sum(If(adj(...), req, 0))`` term with its
+        immediate-adjacency ``adj`` guard, so an every-ordered-pair over-count
+        regression (Allergen->Standard->Spicy charging 90+90=180) WOULD be caught
+        here (the model would eval ``co`` to 180, not the immediate 90)."""
+        s, v = self._feasibility_only_encode(ir)
+        s.add(self._pin_to_plan(plan, ir))
+        assert s.check() == z3.sat, "the plan must be pin-admissible to read co from a model"
+        m = s.model()
+        return int(m.eval(self._changeover_expr(v), model_completion=True).as_long())
 
     def _changeover_of(self, plan: Plan, ir: FCIR) -> int:
         """The encoding's IMMEDIATE-adjacency changeover for a concrete plan: the
