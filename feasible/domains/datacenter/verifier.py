@@ -19,6 +19,19 @@ from feasible.ir.domain import CompileMode, FCIR, Plan, Rule, Severity
 _MISSING = object()
 
 
+class MissingParamWitness(BaseModel):
+    """The fail-closed witness a TOTAL param read emits when a required param is
+    omitted (B-5). It is a REGISTERED witness kind so ``validate_witness`` round-trips
+    it like every other witness — an unregistered kind a predicate can emit would be
+    a fail-closed hole (``validate_witness`` would ``KeyError`` on the cert's own
+    counter-witness)."""
+
+    missing_param: str
+
+
+register_witness_schema("missing_param", MissingParamWitness)
+
+
 def _missing_param_violation(rule_id: str, key: str) -> Violation:
     return Violation(
         rule_id=rule_id, span=None,
@@ -65,11 +78,15 @@ def _power_cap_violations(plan: Plan, ir: FCIR) -> list[Violation]:
     for key in ("cap_id", "scope_units", "cap_kw", "per_member_pct", "draws"):  # required
         if p.get(key, _MISSING) is _MISSING:
             return [_missing_param_violation("dc:power_cap", key)]
-    cap_id = str(p["cap_id"])
-    scope = [str(u) for u in p["scope_units"]]
-    cap_kw = int(p["cap_kw"])               # missing -> would have failed closed above
-    per_member_pct = int(p["per_member_pct"])
-    draws = p["draws"]
+    # TOTAL reads only (no bare subscripts): the guard above already returned for any
+    # missing key, so .get() here is value-identical — but it keeps every param read
+    # in this file a .get(), so a future edit moving a read before its guard cannot
+    # reintroduce the crash-DoS.
+    cap_id = str(p.get("cap_id"))
+    scope = [str(u) for u in p.get("scope_units", [])]
+    cap_kw = int(p.get("cap_kw", 0))            # default never reached (guard returned above)
+    per_member_pct = int(p.get("per_member_pct", 0))
+    draws = p.get("draws", {})
 
     # A missing draw for a scope member fails CLOSED: treat it as the full cap so a
     # member with an omitted nameplate cannot vacuously pass (never a KeyError).
@@ -196,8 +213,8 @@ def _maintenance_window_violations(plan: Plan, ir: FCIR) -> list[Violation]:
                 out.append(_missing_param_violation("dc:maintenance_window", key))
                 break
         else:
-            path_id = str(p["path_id"])
-            forbidden = [(int(a), int(b)) for (a, b) in p["forbidden"]]
+            path_id = str(p.get("path_id"))
+            forbidden = [(int(a), int(b)) for (a, b) in p.get("forbidden", [])]
             for (op_id, ts, te) in _path_tasks(plan, ir, path_id):
                 for (fa, fb) in forbidden:
                     if _overlaps(ts, te, fa, fb):
@@ -304,8 +321,8 @@ def _anti_affinity_violations(plan: Plan, ir: FCIR) -> list[Violation]:
         if missing is not None:
             out.append(_missing_param_violation("dc:anti_affinity", missing))
             continue
-        gid = str(p["group_id"])
-        replicas = [str(u) for u in p["replicas"]]
+        gid = str(p.get("group_id"))
+        replicas = [str(u) for u in p.get("replicas", [])]
         fault_domain_of = p.get("fault_domain_of", {})  # optional -> total (unmapped fails closed)
         # deterministic lexicographic pairs over the replica list
         for i in range(len(replicas)):

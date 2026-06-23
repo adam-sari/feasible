@@ -14,11 +14,25 @@ import inspect
 import pytest
 import z3
 
+import feasible.domains.datacenter  # noqa: F401  (registers the datacenter domain)
 import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
 from feasible.conflict.policy import MANUFACTURING_POLICY
 from feasible.domains import get_domain
 from feasible.govern.pipeline import govern_pack
-from feasible.ir.domain import FCIR
+from feasible.ir.domain import (
+    ClauseKind,
+    CompileMode,
+    ExceptionMode,
+    FCIR,
+    Instance,
+    Job,
+    Operation,
+    Plan,
+    Provenance,
+    Rule,
+    Severity,
+    TextSpan,
+)
 from feasible.registry import UnsupportedHardRuleError, assert_all_hard_rules_supported
 from feasible.scenario import build_extracted_pack, build_scenario_ir
 from feasible.solve.orchestrate import solve
@@ -41,7 +55,55 @@ def _manufacturing_scenario() -> tuple[FCIR, object]:
     return gov.active_ir, res.plan
 
 
-_SCENARIOS = {"manufacturing": _manufacturing_scenario}
+def _datacenter_scenario() -> tuple[FCIR, object]:
+    """A small datacenter ``(active_ir, plan)`` carrying BOTH PLAN-DEPENDENT
+    evaluated ids ACTIVE (``dc:redundancy_floor`` + ``dc:maintenance_window``) so
+    the meta-test's membership⇒predicate guard runs over a REAL datacenter scenario
+    in BOTH engines. The dc solve path lands in Task 7; this builder constructs the
+    IR + a shape-valid plan directly (no solver needed for the membership check)."""
+    units = ["U1", "U2", "U3", "U4"]
+    horizon = 4
+    jobs = [Job(id=u, product=u, family="unit", qty=1, due_date=horizon, priority=3) for u in units]
+    ops = [Operation(op_id=u, job_id=u, seq=0, eligible_machines=[u], duration=1) for u in units]
+    inst = Instance(jobs=jobs, operations=ops, machines=list(units),
+                    setup_matrix={}, maintenance=[], horizon=horizon)
+
+    def _rule(rule_id: str, kind: str, params: dict) -> Rule:
+        return Rule(
+            rule_id=rule_id, kind=kind, params=params,
+            severity=Severity.HARD, clause_kind=ClauseKind.OBLIGATION,
+            compile_mode=CompileMode.PLAN_CONSTRAINT,
+            resolution_class="SAFETY_SANITATION" if rule_id == "dc:redundancy_floor" else "EFFICIENCY",
+            exception_mode=ExceptionMode.NONE,
+            provenance=Provenance(spans=[TextSpan(quoted_text=f"{rule_id} (test)", role="modeling_decision")]),
+        )
+
+    rules = [
+        _rule("dc:redundancy_floor", "redundancy_floor", {
+            "group_id": "G1", "units": ["U1", "U2", "U3"], "floor": 2, "horizon": horizon,
+            "maintenance": {},
+        }),
+        _rule("dc:maintenance_window", "maintenance_window", {
+            "path_id": "U4", "forbidden": [[0, 1]], "derate_kw": {},
+        }),
+        _rule("dc:power_cap", "power_cap", {
+            "cap_id": "CAP", "scope_units": ["U1", "U2"], "cap_kw": 100,
+            "per_member_pct": 80, "draws": {"U1": 40, "U2": 40},
+        }),
+        _rule("dc:anti_affinity", "anti_affinity", {
+            "group_id": "AA", "replicas": ["U1", "U3"],
+            "fault_domain_of": {"U1": "FD-A", "U3": "FD-B"},
+        }),
+    ]
+    ir = FCIR(rules=rules, instance=inst, domain_id="datacenter")
+    plan = Plan(assignments={op.op_id: (0, op.eligible_machines[0]) for op in ir.instance.operations})
+    return ir, plan
+
+
+_SCENARIOS = {
+    "manufacturing": _manufacturing_scenario,
+    "datacenter": _datacenter_scenario,
+}
 
 
 def _z3_tracked_names(verifier, plan, ir) -> set[str]:
