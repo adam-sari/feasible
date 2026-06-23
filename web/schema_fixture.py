@@ -13,10 +13,17 @@ from pathlib import Path
 
 from feasible.domains import base
 
-# the view-models the TS client mirrors 1:1 (the frozen facade surface)
+# the view-models the TS client mirrors 1:1 (the frozen facade surface).
+# CapacitySeriesItem/ThresholdLine are the FROZEN item schemas inside
+# TimelineView.capacity_series/threshold_lines (datacenter-populated). They are
+# emitted here so the Python<->TS drift tripwire is LIVE for the capacity
+# sub-schema too: renaming `t`/`value`/`group`/`label` on those dataclasses
+# changes this fixture and fails both the backend and frontend suites — instead
+# of the tripwire only covering the top-level views.
 _VIEW_MODELS = [
     base.ScenarioInfo, base.InputsView, base.ConstraintsView, base.TrustVector,
     base.CertifyResult, base.TimelineView, base.CertsView, base.VerifyView,
+    base.CapacitySeriesItem, base.ThresholdLine,
 ]
 
 _FIXTURES = Path(__file__).resolve().parent / "app" / "src" / "api" / "__tests__"

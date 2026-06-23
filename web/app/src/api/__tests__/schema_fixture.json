@@ -1,4 +1,9 @@
 {
+  "CapacitySeriesItem": [
+    "group",
+    "t",
+    "value"
+  ],
   "CertifyResult": [
     "domain_id",
     "plan_cert",
@@ -28,6 +33,10 @@
     "data",
     "display_name",
     "domain_id"
+  ],
+  "ThresholdLine": [
+    "label",
+    "value"
   ],
   "TimelineView": [
     "capacity_series",

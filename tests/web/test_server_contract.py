@@ -96,9 +96,14 @@ def test_timeline_route_carries_lanes_and_intervals() -> None:
 
 # --- [MAJOR A-2/A-3] the capacity render has a REAL producer; pin its key shape --- #
 # Manufacturing returns capacity_series=None, so to pin the FROZEN capacity item keys
-# against the TS mirror we assert the TimelineView dataclass + the facade's documented
-# frozen item schema. (Track B's datacenter populates real rows against THIS shape.)
-from feasible.domains.base import TimelineView  # noqa: E402
+# against the TS mirror we assert the LIVE item dataclasses (CapacitySeriesItem /
+# ThresholdLine) — NOT a hand-written set against itself. (Track B's datacenter
+# populates real rows against THIS shape.)
+from feasible.domains.base import (  # noqa: E402
+    CapacitySeriesItem,
+    ThresholdLine,
+    TimelineView,
+)
 
 
 def test_timeline_view_dataclass_keys_match_ts_mirror() -> None:
@@ -114,14 +119,20 @@ def test_timeline_view_dataclass_keys_match_ts_mirror() -> None:
 
 
 def test_capacity_item_frozen_schema_matches_ts() -> None:
-    """The FROZEN capacity-series + threshold-line item keys (facade doc) equal the
-    TS `CapacityPoint`/`ThresholdLine` interface keys. A real datacenter get_timeline
-    emits dicts with EXACTLY these keys; the console renders them with no transform."""
-    # frozen in docs/superpowers/specs/feasible-api-schema.md (Spec 0.5 Task 8):
-    capacity_point_keys = {"t", "value", "group"}      # group optional/None
-    threshold_line_keys = {"label", "value"}
-    # mirror constants the frontend asserts the same sets against (see typesync.test.ts)
-    assert capacity_point_keys == {"t", "value", "group"}
+    """The FROZEN capacity-series + threshold-line item keys equal the TS
+    `CapacityPoint`/`ThresholdLine` interface keys. This is a LIVE cross-check, not a
+    tautology: the key sets are read off the actual `CapacitySeriesItem`/`ThresholdLine`
+    dataclasses via `dataclasses.fields()`, so renaming `t`/`value`/`group`/`label` on
+    those item dataclasses FAILS this test (and, via schema_fixture.py, the frontend
+    typesync test too). A real datacenter get_timeline emits dicts with EXACTLY these
+    keys; the console renders them with no transform."""
+    from dataclasses import fields
+    # LIVE item-schema keys (feasible/domains/base.py), NOT a hand-written mirror:
+    capacity_point_keys = {f.name for f in fields(CapacitySeriesItem)}
+    threshold_line_keys = {f.name for f in fields(ThresholdLine)}
+    # the exact key sets the TS `CapacityPoint`/`ThresholdLine` interfaces declare
+    # (see types.ts) and that typesync.test.ts asserts against schema_fixture.json:
+    assert capacity_point_keys == {"t", "value", "group"}  # group optional/None
     assert threshold_line_keys == {"label", "value"}
 
 
@@ -143,11 +154,16 @@ def test_schema_fixture_matches_live_dataclasses(tmp_path) -> None:
         "schema drift: re-run `.venv/Scripts/python.exe -m web.schema_fixture` and "
         "update the TS types.ts + typesync expectations to match."
     )
-    # spot-check the two seam-critical surfaces
+    # spot-check the seam-critical surfaces
     assert "signer_note" in fresh["TrustVector"]
     assert set(fresh["TimelineView"]) == {
         "domain_id", "lanes", "intervals", "capacity_series", "threshold_lines"
     }
+    # the FROZEN capacity item sub-schemas are LIVE in the tripwire (not just the
+    # top-level views): renaming a field on CapacitySeriesItem/ThresholdLine drifts
+    # the fixture and fails the frontend typesync too.
+    assert set(fresh["CapacitySeriesItem"]) == {"t", "value", "group"}
+    assert set(fresh["ThresholdLine"]) == {"label", "value"}
 
 
 def test_routes_fixture_matches_live_routes() -> None:
