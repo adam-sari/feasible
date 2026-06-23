@@ -51,9 +51,10 @@ from feasible.domains.base import (
 from feasible.ir.domain import FCIR, Plan
 from feasible.smt.attest import attest_feasibility
 
-# The registered scenarios surfaced by the facade. Manufacturing only for Spec 0;
-# the datacenter track appends its id here when it forks against this seam.
-_SCENARIOS: list[str] = ["manufacturing"]
+# The registered scenarios surfaced by the facade. Manufacturing first (real data);
+# the datacenter track (Task 9) appends its id (synthetic facility — the certs are
+# REAL, the DATA is synthetic, surfaced honestly via the domain's data flag).
+_SCENARIOS: list[str] = ["manufacturing", "datacenter"]
 
 # The CANONICAL authenticated/self-described sentences — the EXACT wording the CLI
 # prints (``cli.verify``'s ``auth`` line, cli.py:97-98). The facade is the single
@@ -95,11 +96,17 @@ def _govern(domain: Domain):
 
 
 def list_scenarios() -> list[ScenarioInfo]:
-    """The registered domains as ``ScenarioInfo`` view-models (manufacturing only)."""
+    """The registered domains as ``ScenarioInfo`` view-models.
+
+    The ``data`` flag is HONEST per-domain: it comes from the domain's
+    ``trust_boundary_extra()["data"]`` capability descriptor (manufacturing: real;
+    datacenter: synthetic — the certs are real, the facility data is synthetic) —
+    never a blind ``"real"``."""
     out: list[ScenarioInfo] = []
     for domain_id in _SCENARIOS:
         domain, _verifier = _resolve(domain_id)
-        out.append(ScenarioInfo(domain_id=domain_id, display_name=domain.display_name, data="real"))
+        data = domain.trust_boundary_extra().get("data", "real")
+        out.append(ScenarioInfo(domain_id=domain_id, display_name=domain.display_name, data=data))
     return out
 
 
@@ -227,14 +234,16 @@ def get_timeline(domain_id: str, *, signer_key: Ed25519PrivateKey | None = None)
         for (cm, cs, ce, reason) in plan["cleanouts"]
     ]
     # branch-free capacity overlay through the per-domain seam: RECOMPUTED from the
-    # SIGNED plan + instance (never trusted from rendered metadata). Manufacturing
-    # returns None (no overlay) → the datacenter-only fields stay None; a domain
-    # with an overlay plugs its recompute behind THIS seam. The plan/instance are
+    # SIGNED plan + IR (never trusted from rendered metadata). Manufacturing returns
+    # None (no overlay) → the datacenter-only fields stay None; a domain with an
+    # overlay plugs its recompute behind THIS seam. The plan + the FULL IR are
     # reconstructed from the signed cert bodies so the seam recomputes over the same
-    # objects ``verify`` re-checks.
+    # objects ``verify`` re-checks — the FCIR carries the dc:* rule params (the
+    # redundancy topology lives there, not in the bare Instance), and manufacturing
+    # ignores the arg (returns None) → byte-identical.
     signed_plan = Plan.model_validate(plan)
-    signed_instance = _fcir_from_cert(result.plan_cert).instance
-    overlay = domain.capacity_series(signed_plan, signed_instance)
+    signed_ir = _fcir_from_cert(result.plan_cert)
+    overlay = domain.capacity_series(signed_plan, signed_ir)
     capacity_series = overlay[0] if overlay is not None else None
     threshold_lines = overlay[1] if overlay is not None else None
     return TimelineView(

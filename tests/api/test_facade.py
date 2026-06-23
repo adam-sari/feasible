@@ -13,9 +13,13 @@ from feasible.canon.canonical import new_signing_key
 from feasible.domains.base import CertifyResult, ScenarioInfo, TrustVector, VerifyView
 
 
-def test_list_scenarios_is_manufacturing_only() -> None:
+def test_list_scenarios_includes_manufacturing_first() -> None:
+    # Task 9 appends datacenter to the facade scenario list; manufacturing stays
+    # first (real data), datacenter follows (synthetic facility). Both are surfaced.
     scenarios = api.list_scenarios()
-    assert [s.domain_id for s in scenarios] == ["manufacturing"]
+    ids = [s.domain_id for s in scenarios]
+    assert ids[0] == "manufacturing"
+    assert "datacenter" in ids
     assert all(isinstance(s, ScenarioInfo) for s in scenarios)
     assert scenarios[0].data == "real"
 

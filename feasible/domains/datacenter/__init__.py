@@ -1,60 +1,6 @@
 from __future__ import annotations
 from feasible.domains import register_domain
-from feasible.domains.base import KPI_REGISTRY
-
-
-class _DatacenterDomainStub:
-    domain_id = "datacenter"
-    display_name = "Datacenter (capacity & maintenance planning)"
-
-    def policy_doc(self):
-        return ""
-
-    def build_extracted_pack(self):
-        raise NotImplementedError
-
-    def golden_ir(self):
-        raise NotImplementedError
-
-    def incumbents(self):
-        raise NotImplementedError
-
-    def policy(self):
-        # Task 8: the signed conflict policy this domain certifies under. Surfaced so
-        # the per-domain trusted-policy registry (``trusted_policy_set``) admits it
-        # (the redundancy floor IS the SAFETY_SANITATION class — B-3 — so the guard
-        # protects it and an inverted policy is rejected). Lazy import to avoid a
-        # policy<->domain import cycle.
-        from feasible.conflict.policy import DATACENTER_POLICY
-
-        return DATACENTER_POLICY
-
-    def viz_meta(self):
-        return {}
-
-    # Spec 0.5 Domain seams (stubbed at the spike; Task 9 implements):
-    def solve(self, ir):
-        raise NotImplementedError
-
-    def govern(self):
-        raise NotImplementedError
-
-    def capacity_series(self, plan, instance):
-        return None
-
-    def trust_boundary_extra(self):
-        # honest synthetic flag + (B-2) the gotcha baseline-identity note: inc_a's
-        # identity as a "real baseline an operator would run" is OUT-OF-BAND (a documented
-        # degenerate-objective solve, not a hand-planted floor cleanout — see Task 10).
-        return {
-            "data": "synthetic",
-            "incumbent_a_identity": "out-of-band: inc_a is a documented degenerate-objective "
-                                    "solve (minimize-makespan ignoring the floor); the N+1 "
-                                    "breach is EMERGENT, not hand-planted",
-            "optimality": "tripwire opted out (objective solver-reported, not Z3-attested optimal)",
-        }
-
-
+from feasible.domains.datacenter.domain import DatacenterDomain
 from feasible.domains.datacenter.verifier import DatacenterVerifier
 
 # The id this package registers — read by ``bootstrap_domains`` to detect whether
@@ -67,6 +13,6 @@ DOMAIN_ID = "datacenter"
 # ``KPI_REGISTRY["datacenter"]`` as an import side-effect).
 import feasible.domains.datacenter.kpi  # noqa: E402,F401  (populates KPI_REGISTRY["datacenter"])
 
-register_domain("datacenter", _DatacenterDomainStub(), DatacenterVerifier())
+register_domain("datacenter", DatacenterDomain(), DatacenterVerifier())
 
-__all__ = ["DatacenterVerifier", "DOMAIN_ID"]
+__all__ = ["DatacenterDomain", "DatacenterVerifier", "DOMAIN_ID"]
