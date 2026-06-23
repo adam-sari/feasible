@@ -960,6 +960,18 @@ class DatacenterVerifier:
         # asserts len==2). Task 9 binds the trust_boundary note.
         return False
 
+    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
+        """FREE-SEARCH Z3 strict-improvement encoding (T1.3 lands the real body).
+
+        T1.1 STUB: returns ``None`` (honest opt-out). The same-engine
+        ``optimality_tripwire`` opts out (returns ``False``); T1.3 REPLACES this
+        stub with a real disjoint-engine free-search ``(stranded, makespan)``
+        strict-improvement encoding over the FREE maintenance-task starts — the
+        headline upgrade from "no optimality backing at all" to "corroborated by a
+        disjoint engine." Until then ``None`` maps to ``skipped`` (never falsely
+        corroborated)."""
+        return None
+
     def compile(self, ir: FCIR, model: Any = None) -> tuple[cp_model.CpModel, DcVarIndex]:
         """Build the datacenter CP-SAT model + var index (Task 7). CODE-DISJOINT from
         the checker (this module never imports the checker's coverage_floor kernel; the

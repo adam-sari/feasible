@@ -326,6 +326,18 @@ class ManufacturingVerifier:
 
         return s
 
+    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
+        """FREE-SEARCH Z3 strict-improvement encoding (T1.2 lands the real body).
+
+        T1.1 STUB: returns ``None`` (honest opt-out), so the solver-agnostic
+        orchestrator never returns ``corroborated`` from a stub (it maps ``None ->
+        skipped``). The real two-layer FREE-search FJSP encoding — immediate
+        same-machine adjacency ``adj(i,j,mc)``, a materialized cleanout disjoint
+        from maintenance, the modular night-band, and the two-level lexicographic
+        strict-improvement disjunction mirroring ``optimality.py`` — replaces this
+        stub in T1.2."""
+        return None
+
     # --------------------------------------------------------------------- #
     # The remaining ``DomainVerifier`` members are relocated behind the seam #
     # by later Spec-0 tasks (per-domain registry, govern hooks, KPI         #

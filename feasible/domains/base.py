@@ -104,6 +104,28 @@ class DomainVerifier(Protocol):
         """Parallel Z3 attestation bundle."""
         ...
 
+    def independent_optimality_encode(self, ir: Any, V: tuple[int, ...]) -> Any:
+        """A FREE-SEARCH Z3 solver asserting the FULL hard-constraint set over FREE
+        decision variables PLUS the lexicographic strict-improvement disjunction
+        objective <_lex V. UNSAT => no feasible plan beats V => corroborated.
+
+        Returns a ``z3.Solver`` the caller checks (with a timeout), or ``None`` for
+        the honest opt-out (the SEAM imposes NO arity, exactly like
+        ``optimality_tripwire`` — ``V`` is a variable-length tuple, and a domain
+        that does not (yet) encode a free-search strict-improvement model returns
+        ``None`` honestly rather than forcing a fixed arity). Code-disjoint from
+        CP-SAT — a different SOLVER, so it defends the CP-SAT solver-bug class the
+        same-engine ``optimality_tripwire`` structurally cannot.
+
+        The return annotation is ``-> Any`` (NOT ``-> z3.Solver | None``): this
+        module imports no ``z3`` by design (a domain owns no crypto and the seam
+        stays z3-free), so a literal ``z3.Solver`` here would break ``mypy`` with
+        ``Name "z3" is not defined`` (same convention as ``z3_encode`` above). The
+        concrete impls in the verifier modules (which DO import ``z3``) annotate
+        ``-> "z3.Solver | None"`` locally; the honest ``None`` opt-out is documented
+        here in the docstring, not the annotation."""
+        ...
+
     def compile(self, ir: Any, model: Any) -> Any:
         """CP-SAT variable mapping."""
         ...
