@@ -23,7 +23,8 @@ from feasible.domains import get_domain
 from feasible.domains.datacenter.instance import pack_dc_instance
 from feasible.domains.datacenter.scenario import build_dc_scenario_dc_instance
 from feasible.domains.datacenter.solve import dc_solve
-from feasible.ir.domain import CompileMode, FCIR, Severity
+from feasible.domains.datacenter.verifier import maintenance_makespan
+from feasible.ir.domain import CompileMode, FCIR, Plan, Severity
 from feasible.smt.attest import attest_feasibility
 
 
@@ -88,3 +89,19 @@ def test_dc_objective_generalized_to_full_facility():
     _, verifier = get_domain("datacenter")
     # re-derive solver-free over the extracted plan -> identical to the solver-reported tuple
     assert verifier.objective(ir, res.plan) == tuple(res.objective)
+
+
+def test_makespan_counts_unit_unlinked_maintenance_task():
+    """The SIGNED makespan must count EVERY scheduled maintenance ``task:<id>`` end,
+    including a unit-UNLINKED task (``unit=None``). The CP-SAT model constrains
+    ``makespan >= e`` for every task end (``_dc_build_model`` iterates ALL task links,
+    not just unit-linked ones), so the solver-free recompute must agree or the signed
+    makespan leaf undercounts the plan it certifies.
+
+    Scenario T2 (id='T2', path='F4', duration=1, unit=None) is a real scheduled
+    maintenance op. Here T1 (unit-linked, dur 2) ends at 2 while T2 (unlinked, dur 1)
+    ends at 6 — so the LAST maintenance end is 6, driven by the unlinked task."""
+    ir = _dc_active_ir()
+    plan = Plan(assignments={"task:T1": (0, "F1"), "task:T2": (5, "F4")})
+    # last end over ALL tasks = max(0+2, 5+1) = 6 (the unit-UNLINKED T2 drives it).
+    assert maintenance_makespan(ir, plan) == 6

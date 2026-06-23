@@ -603,13 +603,25 @@ def stranded_power(ir: FCIR, plan: Plan) -> int:
 
 def maintenance_makespan(ir: FCIR, plan: Plan) -> int:
     """The last maintenance END over the plan: the latest of (a) a PLAN-scheduled
-    maintenance TASK end (``task:<id>`` op start + its instance duration) and (b) a
-    legacy ``plan_outage:`` cleanout end. 0 when nothing is scheduled. Solver-free;
-    TOTAL (a task absent from the plan / op missing is skipped, never a KeyError)."""
+    maintenance TASK end (``task:<id>`` op start + its instance duration) — for EVERY
+    task REGARDLESS of redundancy-``unit`` linkage — and (b) a legacy ``plan_outage:``
+    cleanout end. 0 when nothing is scheduled. Solver-free; TOTAL (a task absent from
+    the plan / op missing is skipped, never a KeyError).
+
+    The full-task scope (not the unit-linked ``_task_outage_intervals`` subset) is
+    REQUIRED for solver/cert parity: ``_dc_build_model`` constrains ``makespan >= e``
+    for EVERY task end (``_maintenance_task_links`` includes unit-unlinked tasks), so
+    the solver optimizes a makespan that counts a unit-unlinked task (e.g. scenario T2,
+    ``unit=None``). The signed leaf must count it too or it undercounts the very plan
+    it certifies."""
     ends: list[int] = []
-    # task-outage mechanism (the full facility): every maintenance-task interval.
-    for intervals in _task_outage_intervals(plan, ir).values():
-        ends.extend(b for (_a, b) in intervals)
+    # task ops (the full facility): every PLAN-scheduled maintenance-task end, whether
+    # or not the task derates a redundancy unit. Mirrors _dc_build_model's makespan,
+    # which constrains over EVERY task end (_maintenance_task_links is unit-agnostic).
+    for op_id, (_path, dur, _unit) in _maintenance_task_links(ir).items():
+        if op_id not in plan.assignments or dur <= 0:
+            continue                       # not scheduled / zero-length -> no end (total)
+        ends.append(plan.start(op_id) + dur)
     # legacy slice: plan_outage cleanout ends.
     ends.extend(
         ce for (_mc, _cs, ce, reason) in plan.cleanouts
