@@ -34,6 +34,7 @@ from feasible.domains import UnknownDomainError, bootstrap_domains, get_domain
 from feasible.domains.base import KPI_REGISTRY, DomainVerifier
 from feasible.ir.domain import FCIR, Instance, Plan, Rule
 from feasible.registry import assert_all_hard_rules_supported
+from feasible.solve.independent_optimality import SOLVER_IDENTITY, independent_optimality_check
 from feasible.solve.orchestrate import SolveResult
 from feasible.smt.attest import AttestResult
 
@@ -177,6 +178,11 @@ def emit_plan_cert(
     # ``solve.optimality.optimality_tripwire`` (len==2) → byte-identical here, while a
     # NON-FJSP domain opts out honestly behind the same seam (no fixed arity).
     tripwire_ok = verifier.optimality_tripwire(ir, tuple(objective))
+    # INDEPENDENT-engine corroboration: a DISJOINT second solver (Z3/SMT) re-runs the
+    # strict-improvement query "does a feasible plan beat V?" over a free search. UNSAT =>
+    # corroborated. Fail-honest (timeout/unknown/opt-out -> skipped, never falsely
+    # corroborated). SOLVER-REPORTED at EMIT — verify does NOT re-derive it.
+    disjoint_verdict = independent_optimality_check(ir, tuple(objective))
     gap_bps = 0 if (result.gap == 0.0) else -1  # -1 = not proven optimal
 
     cert: dict = {
@@ -234,6 +240,16 @@ def emit_plan_cert(
                 # objective tuple; ``render_html`` reads it (no hardcoded string).
                 "objective_labels": _leaf(list(verifier.objective_labels), "ledger"),
                 "tripwire_passed": _leaf(tripwire_ok, "solver"),
+                # INDEPENDENT-engine corroboration leaf — NAMED for its MECHANISM (a
+                # disjoint second solver) so a bare "corroborated" never travels without
+                # the engine that produced it. The value is an OBJECT
+                # {"solver":"z3-smt","verdict":"corroborated"|"refuted"|"skipped"}: the
+                # ``solver`` field names the mechanism, the ``verdict`` is never read in
+                # isolation. SOLVER-REPORTED at EMIT (provenance "solver", same trust
+                # class as ``tripwire_passed``) — the solver-free + LLM-free ``verify``
+                # does NOT re-derive it (it cannot replay a Z3 search).
+                "disjoint_solver_corroboration": _leaf(
+                    {"solver": SOLVER_IDENTITY, "verdict": disjoint_verdict.value}, "solver"),
                 "label": _leaf("optimal per CP-SAT, same-engine tripwire", "solver"),
             },
         },
@@ -249,10 +265,23 @@ def emit_plan_cert(
                             "Authenticity rests on the PINNED signer key (verify --signer-key); a rule's "
                             "formalization metadata (clause_kind/compile_mode/severity) is the signer's "
                             "human-gated attestation, not re-derivable from the SOP.",
-            "optimality": "CP-SAT self-reported gap + a SAME-ENGINE tripwire; not independently proven "
-                          "(MiniZinc->Chuffed is a post-v1.1 roadmap item). These optimality leaves are "
-                          "solver-reported and NOT re-checked by the solver-free `verify`; the objective "
-                          "value itself IS recomputed.",
+            "optimality": "CP-SAT self-reported gap + a SAME-ENGINE tripwire, PLUS an INDEPENDENT-engine "
+                          "corroboration: a disjoint second solver (Z3/SMT) re-runs the strict-improvement "
+                          "query 'does a feasible plan beat V?' — UNSAT => "
+                          "disjoint_solver_corroboration={solver:z3-smt, verdict:corroborated}. Because Z3 "
+                          "is a DIFFERENT solver, this defends the CP-SAT solver-bug class "
+                          "(optimal-but-wrong / wrong-bound / false-INFEASIBLE) the same-engine tripwire "
+                          "structurally cannot. LIMIT (correlated-failure residual): WE author both the "
+                          "CP-SAT and the Z3 encodings, so a shared MODELING error is not caught — the "
+                          "closed checker is the model-independent feasibility oracle; there is NO closed "
+                          "oracle for optimality. The FOUR solver-reported optimality leaves "
+                          "(gap_bps/optimal_per_cpsat/tripwire_passed/disjoint_solver_corroboration) are "
+                          "NOT re-checked / not re-derived by the solver-free `verify`. The objective VALUE "
+                          "(objective) IS recomputed by verify, and the objective LABELS (objective_labels) "
+                          "ARE re-derived from the signed-domain verifier (a signed claim verify checks); "
+                          "the four solver-reported leaves above are the ones it leaves alone. On Z3 "
+                          "timeout/unknown the verdict is skipped (fail-honest — never falsely "
+                          "corroborated).",
             "shared_convention": "compiler and checker share only the canonical (start, stable_op_id) order.",
             "semantic_correlation_residual": "a misreading shared by extraction + reviewer + checker is "
                                              "not caught by v1.",
@@ -519,6 +548,14 @@ def render_html(plan_cert: dict) -> str:
     z3 = c["feasibility"]["z3_attest"]["value"]
     opt_label = c["optimality"]["label"]["value"]
     tripwire = c["optimality"]["tripwire_passed"]["value"]
+    # the disjoint-solver corroboration verdict — READ FROM THE SIGNED CERT (never a
+    # constant) and surfaced INLINE-QUALIFIED: the mechanism (solver) + the residual
+    # always travel WITH the verdict so a bare word never appears.
+    dsc = c["optimality"].get("disjoint_solver_corroboration", {}).get("value", {})
+    dsc_verdict = dsc.get("verdict", "skipped")
+    dsc_solver = dsc.get("solver", SOLVER_IDENTITY)
+    dsc_str = (f"disjoint-solver {dsc_verdict} "
+               f"({dsc_solver} — different solver; shared author-model residual)")
     inc_a = plan_cert["incumbent_A_failure"]
     span_q = inc_a["span"].get("quoted_text", "") if inc_a.get("span") else ""
     kpi = plan_cert["kpi_vs_incumbent_B"]
@@ -554,7 +591,7 @@ details{{margin-top:1rem}} pre{{background:#f6f6f6;padding:1rem;overflow:auto;fo
 (rule-pack digest <code>{plan_cert['rule_pack_ref']['rule_pack_digest'][:16]}…</code>)</div>
 <div class="claim"><b>② Feasibility:</b> checker <span class="{'pass' if feas=='PASS' else 'fail'}">{feas}</span>
 · Z3 {z3} (two independent verifiers)</div>
-<div class="claim"><b>③ Optimality:</b> objective ({obj_label_str}) = {obj} — {opt_label}; tripwire_passed={tripwire}</div>
+<div class="claim"><b>③ Optimality:</b> objective ({obj_label_str}) = {obj} — {opt_label}; tripwire_passed={tripwire}; {dsc_str}</div>
 
 <div class="claim gotcha"><b>🎯 Gotcha — incumbent A rejected:</b> violated <code>{inc_a.get('violated_rule_ref')}</code><br>
 cited SOP clause: <i>"{span_q}"</i><br>

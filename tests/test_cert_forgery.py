@@ -514,3 +514,26 @@ def test_forged_objective_labels_is_rejected(bundle) -> None:
     res = verify_plan_cert(bad_pc, bundle["key"].public_key())
     assert res.ok is False
     assert any("objective_labels" in r for r in res.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A18 — the disjoint_solver_corroboration verdict is SOLVER-REPORTED at EMIT (same
+# trust class as tripwire_passed). verify is solver-free + cannot replay a Z3 search,
+# so it does NOT re-derive the verdict. This test PINS that honesty: a re-signed cert
+# tampering the verdict is NOT rejected by verify (it would be FALSE to claim
+# otherwise), AND the trust_boundary DOCUMENTS the leaf as solver-reported /
+# not-verify-re-derived — consistent with the existing tripwire/optimal_per_cpsat/
+# gap_bps leaves. The honest analogue of the forgery suite: where A1-A17 prove verify
+# REJECTS a tamper, A18 proves the project is HONEST that a solver-reported leaf is
+# NOT verify-re-derived (it does not pretend a closed check exists). Parametrized over
+# domain via the ``bundle`` fixture.
+# ---------------------------------------------------------------------------
+def test_disjoint_solver_corroboration_is_documented_solver_reported(bundle) -> None:
+    bad_pc = copy.deepcopy(bundle["pc"])
+    bad_pc["claims"]["optimality"]["disjoint_solver_corroboration"]["value"]["verdict"] = "refuted"
+    _resign(bad_pc, bundle["key"])
+    res = verify_plan_cert(bad_pc, bundle["key"].public_key())
+    assert res.ok is True                                    # solver-reported: verify leaves it alone
+    tb = bad_pc["trust_boundary"]["optimality"].lower()
+    assert "solver-reported" in tb and ("not re-checked" in tb or "not re-derived" in tb)
+    assert bad_pc["claims"]["optimality"]["disjoint_solver_corroboration"]["provenance"] == "solver"
