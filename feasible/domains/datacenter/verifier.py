@@ -2,6 +2,8 @@
 
 Task 0 slice: ``dc:redundancy_floor`` (PLAN-DEPENDENT evaluated).
 Task 2 adds:  ``dc:power_cap`` (STRUCTURAL instance-invariant — B-4).
+Task 3 adds:  ``dc:maintenance_window`` (PLAN-DEPENDENT evaluated — a scheduled
+              maintenance task overlapping a forbidden window on its path).
 """
 from __future__ import annotations
 from typing import Any
@@ -131,6 +133,117 @@ def _power_cap_z3(s: "z3.Solver", ir: FCIR) -> None:
         )
 
 
+# --------------------------------------------------------------------------- #
+# dc:maintenance_window (Task 3) — PLAN-DEPENDENT evaluated                    #
+# --------------------------------------------------------------------------- #
+# A scheduled maintenance TASK (an Operation on a path "machine") whose interval
+# ``[start, start+duration)`` overlaps a FORBIDDEN window on that path (e.g. a
+# change-freeze window) is a violation. The schedulable decision (the start) is
+# the plan's; the duration is the packed op's. Half-open ``[a,b)`` so endpoint
+# inclusivity is exact: a task ending precisely at ``forbidden_start`` (or
+# starting precisely at ``forbidden_end``) does NOT overlap. Code-disjoint from
+# CP-SAT; Z3-mirrored as a tracked assertion ``dc:maintenance_window:<path>:<task>``.
+
+
+class MaintenanceWindowWitness(BaseModel):
+    path_id: str
+    task: str                 # the op_id of the offending maintenance task
+    window: list[int]         # the forbidden [start, end) it overlaps
+    task_start: int
+    task_end: int
+
+
+register_witness_schema("maintenance_window", MaintenanceWindowWitness)
+
+
+def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    """The frozen half-open ``[start, end)`` overlap convention (mirror
+    ``manufacturing.verifier._overlaps``)."""
+    return a_start < b_end and b_start < a_end
+
+
+def _path_tasks(plan: Plan, ir: FCIR, path_id: str) -> list[tuple[str, int, int]]:
+    """Every scheduled maintenance task on ``path_id`` as ``(op_id, start, end)``
+    where ``end = start + op.duration``. Reads the op duration from the certified
+    instance; a task whose only eligible machine is ``path_id`` and which the plan
+    schedules on ``path_id`` counts. TOTAL: an op absent from the plan is skipped
+    (never a KeyError)."""
+    out: list[tuple[str, int, int]] = []
+    for op in ir.instance.operations:
+        if op.op_id not in plan.assignments:
+            continue
+        if plan.machine(op.op_id) != path_id:
+            continue
+        start = plan.start(op.op_id)
+        out.append((op.op_id, start, start + int(op.duration)))
+    return out
+
+
+def _maintenance_window_violations(plan: Plan, ir: FCIR) -> list[Violation]:
+    """TOTAL param reads (B-5): a missing ``path_id``/``forbidden`` -> ONE
+    deterministic violation (passed=False), never a KeyError, never a silent pass.
+    A scheduled task overlapping a forbidden window on its path is flagged with a
+    per-(task, window) witness."""
+    out: list[Violation] = []
+    for r in ir.rules:
+        if r.rule_id != "dc:maintenance_window":
+            continue
+        if not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        for key in ("path_id", "forbidden"):  # required
+            if p.get(key, _MISSING) is _MISSING:
+                out.append(_missing_param_violation("dc:maintenance_window", key))
+                break
+        else:
+            path_id = str(p["path_id"])
+            forbidden = [(int(a), int(b)) for (a, b) in p["forbidden"]]
+            for (op_id, ts, te) in _path_tasks(plan, ir, path_id):
+                for (fa, fb) in forbidden:
+                    if _overlaps(ts, te, fa, fb):
+                        out.append(Violation(
+                            rule_id="dc:maintenance_window", span=None,
+                            message=(f"task {op_id} [{ts},{te}) on {path_id} overlaps "
+                                     f"forbidden window [{fa},{fb})"),
+                            counter_witness={
+                                "path_id": path_id, "task": op_id,
+                                "window": [fa, fb], "task_start": ts, "task_end": te,
+                            },
+                            witness_kind="maintenance_window", witness_version="v1",
+                        ))
+    return out
+
+
+def _maintenance_window_z3(s: "z3.Solver", plan: Plan, ir: FCIR) -> None:
+    """Mirror each (task, forbidden-window) disjointness as a TRACKED Z3 assertion
+    ``dc:maintenance_window:<path>:<task>:<k>`` (``Or(task_end <= fa, task_start >=
+    fb)``). Same TOTAL fail-closed param reads as the checker (a missing param
+    yields an UNSATISFIABLE tracked assertion, so attest fails closed)."""
+    for r in ir.rules:
+        if r.rule_id != "dc:maintenance_window":
+            continue
+        if not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        path_id = str(p.get("path_id", "?"))
+        forbidden_raw = p.get("forbidden", _MISSING)
+        if path_id == "?" or forbidden_raw is _MISSING:
+            # fail closed: a missing required param -> an unsatisfiable tracked clause.
+            s.assert_and_track(z3.BoolVal(False), f"dc:maintenance_window:{path_id}:MISSING_PARAM")
+            continue
+        forbidden = [(int(a), int(b)) for (a, b) in forbidden_raw]
+        for (op_id, ts, te) in _path_tasks(plan, ir, path_id):
+            ts_v = z3.Int(f"mw_start_{path_id}_{op_id}")
+            te_v = z3.Int(f"mw_end_{path_id}_{op_id}")
+            s.add(ts_v == ts)
+            s.add(te_v == te)
+            for k, (fa, fb) in enumerate(forbidden):
+                s.assert_and_track(
+                    z3.Or(te_v <= fa, ts_v >= fb),
+                    f"dc:maintenance_window:{path_id}:{op_id}:{k}",
+                )
+
+
 def _plan_outage_intervals(plan: Plan) -> dict[str, list[tuple[int, int]]]:
     """PLAN-scheduled outages (the schedulable decision carried IN the plan, never
     instance state): a cleanout whose reason is ``plan_outage:<unit>`` removes that
@@ -192,10 +305,14 @@ def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]
 
 class DatacenterVerifier:
     domain_id: str = "datacenter"
-    # rule_kinds: the PLAN-DEPENDENT evaluated kind + the STRUCTURAL kinds (B-4).
-    rule_kinds: frozenset[str] = frozenset({"redundancy_floor", "power_cap"})
+    # rule_kinds: the PLAN-DEPENDENT evaluated kinds + the STRUCTURAL kinds (B-4).
+    rule_kinds: frozenset[str] = frozenset({
+        "redundancy_floor", "maintenance_window", "power_cap",
+    })
     # evaluated (PLAN-DEPENDENT, registry-REQUIRED predicate) ids.
-    evaluated_rule_ids: frozenset[str] = frozenset({"dc:redundancy_floor"})
+    evaluated_rule_ids: frozenset[str] = frozenset({
+        "dc:redundancy_floor", "dc:maintenance_window",
+    })
     # STRUCTURAL kinds (instance-level invariants — B-4): the registry does NOT
     # require a predicate, but a closed/total checker + Z3 mirror STILL run.
     structural_rule_kinds: frozenset[str] = frozenset({"power_cap"})
@@ -207,6 +324,8 @@ class DatacenterVerifier:
         out: list[Violation] = []
         if ir.has_active("dc:redundancy_floor"):
             out += _redundancy_floor_violations(plan, ir)  # TOTAL param reads (B-5)
+        if ir.has_active("dc:maintenance_window"):
+            out += _maintenance_window_violations(plan, ir)  # PLAN-DEPENDENT; TOTAL reads (B-5)
         if ir.has_active("dc:power_cap"):
             out += _power_cap_violations(plan, ir)  # STRUCTURAL invariant; TOTAL reads (B-5)
         return out
@@ -221,6 +340,8 @@ class DatacenterVerifier:
                 s.add(a[t] == avail[t])
             for t, expr in enumerate(coverage_floor_z3(a, floor, horizon)):
                 s.assert_and_track(expr, f"dc:redundancy_floor:{gid}:{t}")
+        if ir.has_active("dc:maintenance_window"):
+            _maintenance_window_z3(s, plan, ir)
         if ir.has_active("dc:power_cap"):
             _power_cap_z3(s, ir)
         return s
