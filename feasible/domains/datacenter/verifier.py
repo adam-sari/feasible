@@ -1,9 +1,15 @@
-"""Datacenter predicate bundle (Task 0 slice: dc:redundancy_floor only)."""
+"""Datacenter predicate bundle.
+
+Task 0 slice: ``dc:redundancy_floor`` (PLAN-DEPENDENT evaluated).
+Task 2 adds:  ``dc:power_cap`` (STRUCTURAL instance-invariant — B-4).
+"""
 from __future__ import annotations
 from typing import Any
 import z3
+from pydantic import BaseModel
 from feasible.checker.coverage_floor import coverage_floor_violations, coverage_floor_z3
 from feasible.checker.result import Violation
+from feasible.domains.base import register_witness_schema
 from feasible.ir.domain import FCIR, Plan
 
 # the sentinel a missing param collapses to, so the floor FAILS CLOSED (a missing
@@ -18,6 +24,111 @@ def _missing_param_violation(rule_id: str, key: str) -> Violation:
         counter_witness={"missing_param": key},
         witness_kind="missing_param", witness_version="v1",
     )
+
+
+# --------------------------------------------------------------------------- #
+# dc:power_cap (Task 2) — STRUCTURAL instance-invariant (B-4)                  #
+# --------------------------------------------------------------------------- #
+# In v1 a rack's nameplate ``draw`` is a FIXED instance fact (not a plan
+# decision), so the power cap is an instance-level structural invariant over the
+# certified instance — NOT a plan-dependent predicate masquerading as
+# plan-checked. Its kind lives in ``structural_rule_kinds`` (the registry does
+# not REQUIRE a predicate for it), but a closed/total checker predicate STILL
+# runs (a structural-kind rule MAY carry one) and is Z3-mirrored. INTEGERS ONLY:
+# the per-member NEC/≤pct% rule is an integer cross-multiply (no float).
+
+
+class PowerCapWitness(BaseModel):
+    cap_id: str
+    scope: list[str]
+    draw: int                 # the aggregate draw over the cap's scope
+    cap: int                  # the cap (kW)
+    members_over_pct: list[dict]   # [{"unit": str, "draw": int}] over per_member_pct% of cap
+
+
+register_witness_schema("power_cap", PowerCapWitness)
+
+
+def _power_cap_violations(plan: Plan, ir: FCIR) -> list[Violation]:
+    """Closed/total instance-invariant over the certified instance. TOTAL param
+    reads (B-5): every required param via ``p.get(...)`` with a fail-closed
+    deterministic single violation — a missing ``cap_kw`` collapses to ``0`` (so
+    every nonzero draw breaches), a missing ``draws[u]`` for a scope member is
+    treated as the cap (so it breaches) — NEVER a ``KeyError``, never a silent
+    pass. (``plan`` is unused — the draws are FIXED instance facts in v1.)"""
+    r = ir.rule("dc:power_cap")
+    if r is None:
+        return []
+    p = r.params
+    for key in ("cap_id", "scope_units", "cap_kw", "per_member_pct", "draws"):  # required
+        if p.get(key, _MISSING) is _MISSING:
+            return [_missing_param_violation("dc:power_cap", key)]
+    cap_id = str(p["cap_id"])
+    scope = [str(u) for u in p["scope_units"]]
+    cap_kw = int(p["cap_kw"])               # missing -> would have failed closed above
+    per_member_pct = int(p["per_member_pct"])
+    draws = p["draws"]
+
+    # A missing draw for a scope member fails CLOSED: treat it as the full cap so a
+    # member with an omitted nameplate cannot vacuously pass (never a KeyError).
+    def _draw(u: str) -> int:
+        v = draws.get(u, _MISSING)
+        return cap_kw if v is _MISSING else int(v)
+
+    aggregate = sum(_draw(u) for u in scope)
+    # per-member NEC/failover rule: 100 * draw[u] <= per_member_pct * cap_kw
+    # (integer cross-multiply — NO float). Deterministic order (scope order).
+    members_over: list[dict] = [
+        {"unit": u, "draw": _draw(u)}
+        for u in scope
+        if 100 * _draw(u) > per_member_pct * cap_kw
+    ]
+    if aggregate <= cap_kw and not members_over:
+        return []
+    w = {
+        "cap_id": cap_id, "scope": list(scope), "draw": aggregate, "cap": cap_kw,
+        "members_over_pct": members_over,
+    }
+    msg = f"{cap_id}: aggregate {aggregate} vs cap {cap_kw}"
+    if members_over:
+        msg += f"; {len(members_over)} member(s) over {per_member_pct}%"
+    return [Violation(
+        rule_id="dc:power_cap", span=None, message=msg,
+        counter_witness=w, witness_kind="power_cap", witness_version="v1")]
+
+
+def _power_cap_z3(s: "z3.Solver", ir: FCIR) -> None:
+    """Mirror the aggregate cap + per-member pct as TRACKED Z3 assertions (the
+    UNSAT core names ``dc:power_cap:<cap_id>`` / ``...:<unit>:pct``). Same TOTAL
+    fail-closed param reads as the checker (a missing param yields an
+    UNSATISFIABLE tracked assertion, so attest fails closed)."""
+    r = ir.rule("dc:power_cap")
+    if r is None:
+        return
+    p = r.params
+    cap_id = str(p.get("cap_id", "?"))
+    scope = [str(u) for u in p.get("scope_units", [])]
+    # missing cap_kw -> 0 (every nonzero draw breaches); missing per_member_pct -> 0.
+    cap_kw = int(p.get("cap_kw", 0))
+    per_member_pct = int(p.get("per_member_pct", 0))
+    draws = p.get("draws", {})
+
+    def _draw(u: str) -> int:
+        v = draws.get(u, _MISSING)
+        return cap_kw if v is _MISSING else int(v)
+
+    d = {u: z3.Int(f"draw_{cap_id}_{u}") for u in scope}
+    for u in scope:
+        s.add(d[u] == _draw(u))
+    # aggregate: sum(draws) <= cap_kw
+    agg = z3.Sum([d[u] for u in scope]) if scope else z3.IntVal(0)
+    s.assert_and_track(agg <= cap_kw, f"dc:power_cap:{cap_id}")
+    # per-member: 100 * draw[u] <= per_member_pct * cap_kw (integer cross-multiply)
+    for u in scope:
+        s.assert_and_track(
+            100 * d[u] <= per_member_pct * cap_kw,
+            f"dc:power_cap:{cap_id}:{u}:pct",
+        )
 
 
 def _plan_outage_intervals(plan: Plan) -> dict[str, list[tuple[int, int]]]:
@@ -81,15 +192,23 @@ def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]
 
 class DatacenterVerifier:
     domain_id: str = "datacenter"
-    rule_kinds: frozenset[str] = frozenset({"redundancy_floor"})
+    # rule_kinds: the PLAN-DEPENDENT evaluated kind + the STRUCTURAL kinds (B-4).
+    rule_kinds: frozenset[str] = frozenset({"redundancy_floor", "power_cap"})
+    # evaluated (PLAN-DEPENDENT, registry-REQUIRED predicate) ids.
     evaluated_rule_ids: frozenset[str] = frozenset({"dc:redundancy_floor"})
-    structural_rule_kinds: frozenset[str] = frozenset()
-    known_rule_ids: frozenset[str] = evaluated_rule_ids
+    # STRUCTURAL kinds (instance-level invariants — B-4): the registry does NOT
+    # require a predicate, but a closed/total checker + Z3 mirror STILL run.
+    structural_rule_kinds: frozenset[str] = frozenset({"power_cap"})
+    # the COMPLETE set of rule_ids this domain owns (cross-domain isolation): the
+    # evaluated ids + the structural ids.
+    known_rule_ids: frozenset[str] = evaluated_rule_ids | frozenset({"dc:power_cap"})
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         out: list[Violation] = []
         if ir.has_active("dc:redundancy_floor"):
             out += _redundancy_floor_violations(plan, ir)  # TOTAL param reads (B-5)
+        if ir.has_active("dc:power_cap"):
+            out += _power_cap_violations(plan, ir)  # STRUCTURAL invariant; TOTAL reads (B-5)
         return out
 
     def z3_encode(self, plan: Plan, ir: FCIR) -> "z3.Solver":
@@ -102,6 +221,8 @@ class DatacenterVerifier:
                 s.add(a[t] == avail[t])
             for t, expr in enumerate(coverage_floor_z3(a, floor, horizon)):
                 s.assert_and_track(expr, f"dc:redundancy_floor:{gid}:{t}")
+        if ir.has_active("dc:power_cap"):
+            _power_cap_z3(s, ir)
         return s
 
     def gotcha_rule_id(self) -> str | None:
