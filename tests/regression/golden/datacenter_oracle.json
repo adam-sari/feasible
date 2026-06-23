@@ -1,0 +1,135 @@
+{
+  "active_rule_set_for_plan": {
+    "active_rule_ids": [
+      "dc:maintenance_window",
+      "dc:redundancy_floor"
+    ],
+    "active_rule_set_digest": "157471cf7a28396ea9581bf3e86599ec284eb0ae44faf4a03d88914f9f26272f",
+    "dropped": [
+      {
+        "conflict_policy_ref": {
+          "digest": "ed614749bd0a94b6b8ec42ed7d2da390eef8f83035543cd0adc47651405efc9e",
+          "policy_id": "datacenter_v1"
+        },
+        "drop_reason": "rule_inactive_for_plan_by_policy",
+        "resolution_mode": "AUTO_BY_POLICY",
+        "rule_id": "dc:accel-skip-redundancy"
+      }
+    ]
+  },
+  "claims_feasibility": {
+    "checker": {
+      "provenance": "checker",
+      "value": "PASS"
+    },
+    "z3_attest": {
+      "provenance": "checker",
+      "value": "attested"
+    }
+  },
+  "claims_formalization": {
+    "checked_rule_ids": {
+      "provenance": "ledger",
+      "value": [
+        "dc:maintenance_window",
+        "dc:redundancy_floor"
+      ]
+    },
+    "n_hard_rules": {
+      "provenance": "ledger",
+      "value": 2
+    },
+    "rule_pack_digest_ref": {
+      "provenance": "rule_pack_digest_ref",
+      "value": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57"
+    },
+    "rules_grounded_in_source": {
+      "provenance": "ledger",
+      "value": 2
+    },
+    "structurally_enforced_rule_ids": {
+      "provenance": "ledger",
+      "value": []
+    }
+  },
+  "conflict_status": {
+    "internal_conflict": false,
+    "resolutions": [
+      {
+        "dropped": "dc:accel-skip-redundancy",
+        "obligation": "dc:redundancy_floor",
+        "permission": "dc:accel-skip-redundancy",
+        "rationale": "SAFETY_SANITATION(100) > ACCELERATION(50) under datacenter_v1@ed614749bd0a: Redundancy / N+1 / 2N safety floor wins over Commissioning acceleration",
+        "resolution_mode": "AUTO_BY_POLICY",
+        "z3_core": [
+          "dc:accel-skip-redundancy",
+          "dc:redundancy_floor"
+        ]
+      }
+    ]
+  },
+  "coverage_ledger": {
+    "complete": true,
+    "denominator": 5,
+    "red_findings": [],
+    "relative_to": "deterministic span enumeration + closed normativity taxonomy"
+  },
+  "incumbent_A_failure": {
+    "counter_witness": {
+      "available": 1,
+      "floor": 2,
+      "group_id": "G1",
+      "timestep": 6
+    },
+    "span": null,
+    "violated_rule_ref": "dc:redundancy_floor"
+  },
+  "instance_ref": {
+    "instance_digest": "7aca7813accfa9b6092ec629a674c2f3932a1aeabcab137e676028bac78ff662"
+  },
+  "kpi_function_refs": {
+    "maintenance_makespan": {
+      "function_id": "dc:maintenance_makespan",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    },
+    "sla_penalty": {
+      "function_id": "dc:sla_penalty",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    },
+    "stranded_power": {
+      "function_id": "dc:stranded_power",
+      "function_version": "v1",
+      "input_schema_digest": "69ecc397abfb9379cd423155ffa0db6cafd195953f03a4a4f33bb5ac0e834f88"
+    }
+  },
+  "kpi_vs_incumbent_B": {
+    "maintenance_makespan": {
+      "incumbent_b": 6,
+      "optimized": 4
+    },
+    "sla_penalty": {
+      "incumbent_b": 0,
+      "optimized": 0
+    },
+    "stranded_power": {
+      "incumbent_b": 0,
+      "optimized": 0
+    }
+  },
+  "objective": [
+    0,
+    4
+  ],
+  "objective_labels": [
+    "stranded_power_kw",
+    "makespan"
+  ],
+  "rule_pack_digest": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57",
+  "rule_pack_ref": {
+    "rule_pack_cert_signature_ref": null,
+    "rule_pack_digest": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57",
+    "rule_pack_id": "rule-pack-golden"
+  }
+}
