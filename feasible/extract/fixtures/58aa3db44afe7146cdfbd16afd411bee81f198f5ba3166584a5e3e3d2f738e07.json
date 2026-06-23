@@ -1,0 +1,1 @@
+{"rule_id": "C-SANITATION", "kind": "setup_cleanout", "clause_kind": "OBLIGATION", "severity": "HARD", "verbatim_quote": "a full 90-minute sanitation cleanout is required before the next product runs", "params_json": "{\"cleanout_minutes\": 90}", "rationale": "obligation"}

@@ -11,6 +11,7 @@ from feasible.canon.canonical import new_signing_key, public_key_hex
 from feasible.cert.plan_cert import emit_plan_cert, render_html
 from feasible.checker.checker import check
 from feasible.conflict.policy import MANUFACTURING_POLICY
+from feasible.extract import extract_policy, make_provider, render_report
 from feasible.govern.coverage import build_coverage_ledger
 from feasible.govern.pipeline import govern_pack
 from feasible.scenario import (
@@ -183,6 +184,70 @@ def certify(
     typer.echo(f"wrote {rulepack_out}, {out}, {Path(out).with_suffix('.html')}")
     if not view.ok:
         raise typer.Exit(1)
+
+
+@app.command()
+def extract(
+    policy: str = typer.Argument(..., help="path to a policy/SOP .md to draft rules from"),
+    provider: str = typer.Option("gemini", help="drafting provider (only 'gemini' in v1)"),
+    domain_id: str = typer.Option("manufacturing", help="domain whose golden_ir to diff against"),
+    out: str = typer.Option("draft.json", help="output candidate-IR JSON (DRAFT — not a cert)"),
+    report: str = typer.Option("report.md", help="output extraction report (Markdown)"),
+    record: bool = typer.Option(
+        False, help="LIVE Gemini + record fixtures (needs GEMINI_API_KEY); omit to replay offline"),
+) -> None:
+    """Draft candidate rules from a policy doc via Gemini (boundary A, NON-GATING).
+
+    Segments deterministically (pre-LLM), drafts one candidate rule per span,
+    exact-anchors every quote WITHIN its source segment (fail-closed; cross-segment
+    quotes dropped), flags param-vs-span mismatches, then runs the LLM-free coverage
+    ledger + back-translation + a diff vs the trusted golden_ir. Writes a DRAFT
+    candidate IR + a human-review report. NOTHING here is certified — only a
+    human-approved golden_ir is ever signed. (v1: manufacturing only.)
+    """
+    if provider != "gemini":
+        raise typer.BadParameter(f"only 'gemini' is wired in v1, got {provider!r}")
+    policy_text = Path(policy).read_text(encoding="utf-8")
+    fixtures_dir = Path(__file__).resolve().parent / "extract" / "fixtures"
+    prov = make_provider(record=record, fixtures_dir=fixtures_dir)
+    rep = extract_policy(policy_text, domain_id=domain_id, provider=prov, fixtures_dir=fixtures_dir)
+
+    draft_payload = {
+        "non_gating_note": rep.non_gating_note,
+        "domain_id": rep.domain_id,
+        "source_sha256": rep.source_sha256,
+        "candidate_ir": {
+            "domain_id": rep.candidate_ir.domain_id,
+            "rules": [r.model_dump(mode="json") for r in rep.candidate_ir.rules],
+        },
+        # C-2: machine-readable per-draft review metadata (the param-mismatch flag)
+        "drafted_meta": [
+            {
+                "rule_id": d.rule.rule_id,
+                "char_start": d.char_start,
+                "char_end": d.char_end,
+                "param_mismatch": d.param_mismatch,
+                "param_mismatch_note": d.param_mismatch_note,
+            }
+            for d in rep.drafted
+        ],
+        "ungrounded": rep.ungrounded,
+        "golden_diff": rep.golden_diff,
+        "coverage": rep.coverage.model_dump(mode="json"),
+    }
+    Path(out).write_text(json.dumps(draft_payload, indent=2), encoding="utf-8")
+    Path(report).write_text(render_report(rep), encoding="utf-8")
+
+    n_param_flags = sum(1 for d in rep.drafted if d.param_mismatch)
+    typer.echo("=== Feasible extract (DRAFT — NOT CERTIFIED) ===")
+    typer.echo(f"segments={rep.n_segments}  drafted={len(rep.drafted)}  "
+               f"ungrounded(dropped)={len(rep.ungrounded)}  param_mismatch_flags={n_param_flags}")
+    typer.echo(f"coverage: complete={rep.coverage.complete} "
+               f"denominator={rep.coverage.denominator} red={len(rep.coverage.red_findings)}")
+    typer.echo(f"diff vs golden: only_in_golden={rep.golden_diff['only_in_golden']} "
+               f"only_in_draft={rep.golden_diff['only_in_draft']}")
+    typer.echo(f"wrote {out} (draft IR) and {report} (review report)")
+    typer.echo("NOTE: drafts gate nothing — only a human-approved golden_ir is certified.")
 
 
 if __name__ == "__main__":
