@@ -19,6 +19,8 @@ op or empty group fails CLOSED via the kernel's ``available_by_t.get(t, 0)``.
 """
 from __future__ import annotations
 
+import copy
+
 import feasible.domains.datacenter  # noqa: F401  (registers the datacenter domain)
 from feasible.checker.checker import check
 from feasible.domains.datacenter.instance import (
@@ -29,7 +31,8 @@ from feasible.domains.datacenter.instance import (
     RedundancyGroup,
     pack_dc_instance,
 )
-from feasible.ir.domain import FCIR, Plan
+from feasible.ir.domain import FCIR, CompileMode, Plan, Severity
+from feasible.smt.attest import attest_feasibility
 
 
 def _ir_two_groups_one_shared_unit() -> FCIR:
@@ -210,3 +213,61 @@ def test_spike_redundancy_still_holds_legacy_slice():
     inc = baseline_plan(ir, {"U2": (1, 3)})
     g = [v for v in check(inc, ir).violations if v.rule_id == "dc:redundancy_floor"]
     assert g and g[0].counter_witness == {"group_id": "feedA", "timestep": 1, "available": 1, "floor": 2}
+
+
+def _demote_group(ir: FCIR, group_id: str) -> FCIR:
+    """Return a deepcopy of ``ir`` with the ``group_id`` redundancy group demoted to
+    an INACTIVE (SOFT/CONFLICT_ONLY) rule — the only way to manufacture an inactive
+    redundancy group, since ``pack_dc_instance`` always emits them HARD/PLAN_CONSTRAINT."""
+    out = copy.deepcopy(ir)
+    for r in out.rules:
+        if r.rule_id == "dc:redundancy_floor" and r.params.get("group_id") == group_id:
+            r.severity = Severity.SOFT
+            r.compile_mode = CompileMode.CONFLICT_ONLY
+    return out
+
+
+def test_inactive_group_breach_skipped_by_check_and_attest_agree():
+    """Checker/Z3 active-gating PARITY: an INACTIVE (SOFT/CONFLICT_ONLY) redundancy
+    group that BREACHES the floor must be skipped GROUP-FOR-GROUP by BOTH the checker
+    AND the Z3 mirror — never over-constrain attest with an inactive group.
+
+    Before the fix, ``_redundancy_floor_violations`` filtered each group on the active
+    predicate (correctly skipped the inactive group -> check passes), but the Z3
+    mirror iterated ``_redundancy_groups_available`` with NO active filter, encoding a
+    tracked ``avail>=floor`` constraint for EVERY group -> attest went INFEASIBLE on
+    the inactive breaching group. The two must AGREE: check passes AND attest feasible."""
+    ir = _ir_two_groups_one_shared_unit()  # G1=[U1,U2,U3] floor2, G2=[U3,U4] floor2
+    # U3 down [2,4): the ACTIVE-group view holds for G1 (U1,U2 -> 2) and would breach
+    # G2. Demote G2 to INACTIVE so NEITHER check nor attest should flag it.
+    ir = _demote_group(ir, "G2")
+    plan = _plan_with_task_outage(ir, unit="U3", start=2, end=4)  # U3 down [2,4)
+
+    res = check(plan, ir)
+    # G2 is inactive -> the checker skips it; G1 holds -> NO redundancy-floor violation.
+    assert [v for v in res.violations if v.rule_id == "dc:redundancy_floor"] == []
+    assert res.passed
+
+    # The Z3 mirror must AGREE group-for-group: an inactive breaching group must NOT
+    # over-constrain attest. Feasible (SAT), not a FALSE INFEASIBLE.
+    att = attest_feasibility(plan, ir)
+    assert att.feasible, att.unsat_core
+
+
+def test_active_group_breach_still_caught_by_check_and_attest():
+    """The parity fix must NOT silence an ACTIVE breaching group. An ACTIVE
+    (HARD/PLAN_CONSTRAINT) group that breaches is still flagged by check AND drives
+    attest INFEASIBLE (the active-filter only skips INACTIVE groups)."""
+    ir = _ir_two_groups_one_shared_unit()  # both groups active
+    plan = _plan_with_task_outage(ir, unit="U3", start=2, end=4)  # U3 down [2,4)
+
+    res = check(plan, ir)
+    g2 = [v for v in res.violations
+          if v.rule_id == "dc:redundancy_floor" and v.counter_witness["group_id"] == "G2"]
+    assert {v.counter_witness["timestep"] for v in g2} == {2, 3}
+    assert not res.passed
+
+    att = attest_feasibility(plan, ir)
+    assert not att.feasible  # the active G2 breach drives Z3 UNSAT
+    # the unsat core names the active group's per-timestep tracked constraint.
+    assert any("dc:redundancy_floor:G2" in c for c in att.unsat_core), att.unsat_core

@@ -336,6 +336,28 @@ def _redundancy_groups(ir: FCIR) -> list[Rule]:
     return [r for r in ir.rules if r.rule_id == "dc:redundancy_floor"]
 
 
+def _active_redundancy_group(r: Rule) -> bool:
+    """The SINGLE active-group predicate (mirrors ``FCIR.has_active``): a redundancy
+    group is enforced iff it is HARD/PLAN_CONSTRAINT. The checker AND the Z3 mirror
+    AND the objective seam all gate on THIS predicate, so check and attest agree
+    GROUP-FOR-GROUP — an INACTIVE (SOFT/CONFLICT_ONLY) group that breaches is skipped
+    by BOTH (the checker passes; the mirror must NOT over-constrain attest)."""
+    return r.severity == Severity.HARD and r.compile_mode == CompileMode.PLAN_CONSTRAINT
+
+
+def _active_redundancy_groups(ir: FCIR) -> list[Rule]:
+    """The ACTIVE ``dc:redundancy_floor`` rules (the enforced groups). The shared
+    iteration order for the checker, the Z3 mirror, and the objective seam."""
+    return [r for r in _redundancy_groups(ir) if _active_redundancy_group(r)]
+
+
+def _has_active_redundancy_group(ir: FCIR) -> bool:
+    """Gate parity: TRUE iff at least one ACTIVE redundancy group exists. The checker
+    gate and the Z3 gate both use THIS (not ``any rule_id == ...``), so an IR carrying
+    ONLY inactive redundancy groups encodes no redundancy constraints in EITHER path."""
+    return any(_active_redundancy_group(r) for r in _redundancy_groups(ir))
+
+
 def _redundancy_floor_violations(plan: Plan, ir: FCIR) -> list[Violation]:
     """TOTAL param reads + MULTI-GROUP (Task 4): one ``coverage_floor_violations``
     call per ``dc:redundancy_floor`` rule. Any missing required param on a group ->
@@ -345,9 +367,7 @@ def _redundancy_floor_violations(plan: Plan, ir: FCIR) -> list[Violation]:
     task_outage = _task_outage_intervals(plan, ir)
     plan_outage = _plan_outage_intervals(plan)
     out: list[Violation] = []
-    for r in _redundancy_groups(ir):
-        if r.severity != Severity.HARD or r.compile_mode != CompileMode.PLAN_CONSTRAINT:
-            continue                        # only active hard plan-constraint groups
+    for r in _active_redundancy_groups(ir):  # SHARED active-group predicate (= Z3 mirror)
         p = r.params
         missing = next((k for k in ("group_id", "units", "floor", "horizon")
                         if p.get(k, _MISSING) is _MISSING), None)
@@ -363,20 +383,27 @@ def _redundancy_floor_violations(plan: Plan, ir: FCIR) -> list[Violation]:
 def _redundancy_groups_available(
     plan: Plan, ir: FCIR,
 ) -> list[tuple[str, int, int, dict[int, int]]]:
-    """Per-group ``(group_id, floor, horizon, available_by_t)`` for EVERY redundancy
-    group — used by the Z3 mirror + the objective seam. Reads params TOTALLY (a
-    missing required param collapses that group to floor-breaching emptiness)."""
+    """Per-group ``(group_id, floor, horizon, available_by_t)`` for every ACTIVE
+    redundancy group — used by the Z3 mirror + the objective seam. Gated on the SAME
+    ``_active_redundancy_group`` predicate as ``_redundancy_floor_violations``, so the
+    Z3 mirror encodes ``avail>=floor`` for EXACTLY the groups the checker evaluates —
+    check and attest agree GROUP-FOR-GROUP (an INACTIVE breaching group is skipped by
+    both; the mirror never over-constrains attest into a FALSE INFEASIBLE). Reads
+    params TOTALLY (a missing required param collapses that group to floor-breaching
+    emptiness)."""
     task_outage = _task_outage_intervals(plan, ir)
     plan_outage = _plan_outage_intervals(plan)
     return [
         _group_available_by_t(plan, ir, r.params, task_outage, plan_outage)
-        for r in _redundancy_groups(ir)
+        for r in _active_redundancy_groups(ir)
     ]
 
 
 def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]]:
-    """Back-compat single-group view (the FIRST redundancy group), used by the
-    objective seam's spike proxy. Multi-group consumers use
+    """Back-compat single-group view (the FIRST ACTIVE redundancy group), used by the
+    objective seam's spike proxy. Gated on the SAME _active_redundancy_group predicate
+    as the checker/mirror, so the objective measures the enforced floor (an INACTIVE
+    group never drives stranded_power_kw). Multi-group consumers use
     ``_redundancy_groups_available``. Reads params TOTALLY (fail-closed)."""
     groups = _redundancy_groups_available(plan, ir)
     if groups:
@@ -403,9 +430,9 @@ class DatacenterVerifier:
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         out: list[Violation] = []
-        # MULTI-GROUP (Task 4): _redundancy_floor_violations iterates EVERY
-        # dc:redundancy_floor rule, filtering active/HARD/PLAN_CONSTRAINT per group.
-        if any(r.rule_id == "dc:redundancy_floor" for r in ir.rules):
+        # MULTI-GROUP (Task 4): _redundancy_floor_violations iterates every ACTIVE
+        # dc:redundancy_floor rule (the shared _active_redundancy_group predicate).
+        if _has_active_redundancy_group(ir):
             out += _redundancy_floor_violations(plan, ir)  # TOTAL param reads (B-5)
         if ir.has_active("dc:maintenance_window"):
             out += _maintenance_window_violations(plan, ir)  # PLAN-DEPENDENT; TOTAL reads (B-5)
@@ -416,9 +443,12 @@ class DatacenterVerifier:
     def z3_encode(self, plan: Plan, ir: FCIR) -> "z3.Solver":
         s = z3.Solver()
         s.set(unsat_core=True)
-        # MULTI-GROUP (Task 4): one tracked block per redundancy group; a unit shared
-        # across groups appears in BOTH groups' availability (code-disjoint from CP-SAT).
-        if any(r.rule_id == "dc:redundancy_floor" for r in ir.rules):
+        # MULTI-GROUP (Task 4): one tracked block per ACTIVE redundancy group; a unit
+        # shared across groups appears in BOTH groups' availability (code-disjoint from
+        # CP-SAT). Gated + iterated on the SAME _active_redundancy_group predicate as the
+        # checker, so check and attest agree group-for-group (no over-constraint on an
+        # INACTIVE breaching group — never a FALSE INFEASIBLE).
+        if _has_active_redundancy_group(ir):
             for gid, floor, horizon, avail in _redundancy_groups_available(plan, ir):
                 a = {t: z3.Int(f"avail_{gid}_{t}") for t in range(horizon)}
                 for t in range(horizon):
