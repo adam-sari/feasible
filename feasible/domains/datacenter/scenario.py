@@ -154,12 +154,21 @@ _RULE_QUOTE: dict[str, str] = {
     "dc:anti_affinity": _ANTI_AFFINITY_QUOTE,
 }
 
-# The rule kinds promoted to ACTIVE (HARD/PLAN_CONSTRAINT) in the golden scenario.
+# The rule ids promoted to ACTIVE (HARD/PLAN_CONSTRAINT) in the golden scenario.
 # redundancy_floor is already HARD/PLAN_CONSTRAINT from the packer; maintenance_window
 # is PLAN-DEPENDENT and is promoted here so the solver respects the forbidden windows.
-# The STRUCTURAL power_cap/anti_affinity stay instance invariants (SOFT/CONFLICT_ONLY),
-# checked by their closed predicates but not plan-scheduled.
-_ACTIVE_RULE_IDS: frozenset[str] = frozenset({"dc:redundancy_floor", "dc:maintenance_window"})
+# The STRUCTURAL power_cap/anti_affinity are ALSO promoted to HARD/PLAN_CONSTRAINT: they
+# are instance-invariant guards (rack draws are fixed nameplate facts; replica fault-domain
+# placement is a fixed instance fact in v1) whose KIND is in the verifier's
+# ``structural_rule_kinds`` — so ``assert_all_hard_rules_supported`` admits them by KIND
+# (kind-based support, NOT rule_id), their closed checker predicates + Z3 mirrors actually
+# run on the certified plan, and the plan cert's ``structurally_enforced_rule_ids`` ledger
+# demonstrates the structural-enforcement guarantee instead of being vacuously empty. A
+# 'structural' rule emitted SOFT/CONFLICT_ONLY would be contradictory + inert (its
+# predicate would never fire), so the honest classification is HARD/PLAN_CONSTRAINT.
+_ACTIVE_RULE_IDS: frozenset[str] = frozenset({
+    "dc:redundancy_floor", "dc:maintenance_window", "dc:power_cap", "dc:anti_affinity",
+})
 
 
 def _anchor_dc_rules(rules: list[Rule], sop_text: str) -> None:

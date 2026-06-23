@@ -1,10 +1,12 @@
 {
   "active_rule_set_for_plan": {
     "active_rule_ids": [
+      "dc:anti_affinity",
       "dc:maintenance_window",
+      "dc:power_cap",
       "dc:redundancy_floor"
     ],
-    "active_rule_set_digest": "157471cf7a28396ea9581bf3e86599ec284eb0ae44faf4a03d88914f9f26272f",
+    "active_rule_set_digest": "3b3b9868878c98f8ed0d44d33c4ac6740cdf22fdc1b80523c9d12a253d31df16",
     "dropped": [
       {
         "conflict_policy_ref": {
@@ -37,19 +39,22 @@
     },
     "n_hard_rules": {
       "provenance": "ledger",
-      "value": 2
+      "value": 4
     },
     "rule_pack_digest_ref": {
       "provenance": "rule_pack_digest_ref",
-      "value": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57"
+      "value": "7b1694927bb7c5a1c9fced4a9900e023dbcdbab65609aa144a98f3312d828514"
     },
     "rules_grounded_in_source": {
       "provenance": "ledger",
-      "value": 2
+      "value": 4
     },
     "structurally_enforced_rule_ids": {
       "provenance": "ledger",
-      "value": []
+      "value": [
+        "dc:anti_affinity",
+        "dc:power_cap"
+      ]
     }
   },
   "conflict_status": {
@@ -126,10 +131,10 @@
     "stranded_power_kw",
     "makespan"
   ],
-  "rule_pack_digest": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57",
+  "rule_pack_digest": "7b1694927bb7c5a1c9fced4a9900e023dbcdbab65609aa144a98f3312d828514",
   "rule_pack_ref": {
     "rule_pack_cert_signature_ref": null,
-    "rule_pack_digest": "eb77623d5be04a75694da4726e82628686e602b10915e180f36a20035da2de57",
+    "rule_pack_digest": "7b1694927bb7c5a1c9fced4a9900e023dbcdbab65609aa144a98f3312d828514",
     "rule_pack_id": "rule-pack-golden"
   }
 }

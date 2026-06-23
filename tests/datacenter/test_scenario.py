@@ -17,16 +17,18 @@
 from __future__ import annotations
 
 import feasible.domains.datacenter  # noqa: F401  (registers the datacenter domain)
+from feasible.cert.plan_cert import checked_rule_ids, structurally_enforced_rule_ids
 from feasible.domains import get_domain
 from feasible.domains.datacenter.scenario import (
     CAPACITY_POLICY,
     REDUNDANCY_SENTENCE,
     build_dc_extracted_pack,
+    build_dc_scenario_active_ir,
     build_dc_scenario_ir,
 )
 from feasible.govern.coverage import build_coverage_ledger
 from feasible.ingest.segment import Segment, anchor
-from feasible.ir.domain import ClauseKind, CompileMode, FCIR, TextSpan
+from feasible.ir.domain import ClauseKind, CompileMode, FCIR, Severity, TextSpan
 
 
 def test_scenario_ir_is_datacenter_domain():
@@ -77,3 +79,34 @@ def test_redundancy_sentence_classifies_hard_obligation():
     _, verifier = get_domain("datacenter")
     seg = Segment(char_start=0, char_end=len(REDUNDANCY_SENTENCE), text=REDUNDANCY_SENTENCE)
     assert verifier.classify_segment(seg) == "hard_obligation"
+
+
+def test_structural_caps_are_active_hard_plan_rules_in_scenario():
+    """The structural ``dc:power_cap``/``dc:anti_affinity`` are emitted HARD/
+    PLAN_CONSTRAINT in the governed scenario active set: their KIND is in
+    ``structural_rule_kinds`` (so they are SUPPORTED kind-wise, not as inert
+    SOFT/CONFLICT_ONLY rules), and they are now active hard-plan guards whose closed
+    predicates actually run on the certified plan. A 'structural' rule that is
+    CONFLICT_ONLY would be contradictory + inert — this pins them honest."""
+    ir = build_dc_scenario_active_ir()
+    for rid in ("dc:power_cap", "dc:anti_affinity"):
+        r = ir.rule(rid)
+        assert r is not None
+        assert r.severity == Severity.HARD
+        assert r.compile_mode == CompileMode.PLAN_CONSTRAINT
+        assert ir.has_active(rid)
+
+
+def test_structurally_enforced_and_checked_rule_ids_partition_the_active_hard_rules():
+    """The cert's formalization ledger now DEMONSTRATES the structural-enforcement
+    guarantee: ``structurally_enforced_rule_ids`` is the two structural caps (no longer
+    a vacuously-empty ``[]``) and ``checked_rule_ids`` stays the two predicate-evaluated
+    plan-dependent rules. The two sets partition the active hard PLAN_CONSTRAINT rules."""
+    ir = build_dc_scenario_active_ir()
+    assert structurally_enforced_rule_ids(ir) == ["dc:anti_affinity", "dc:power_cap"]
+    assert checked_rule_ids(ir) == ["dc:maintenance_window", "dc:redundancy_floor"]
+    # the two ledger sets partition the active hard rules (no rule both checked and
+    # structurally enforced; together they cover every active hard PLAN_CONSTRAINT rule).
+    hard = {r.rule_id for r in ir.hard_plan_rules()}
+    assert hard == set(structurally_enforced_rule_ids(ir)) | set(checked_rule_ids(ir))
+    assert not (set(structurally_enforced_rule_ids(ir)) & set(checked_rule_ids(ir)))
