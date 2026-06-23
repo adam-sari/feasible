@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from feasible.checker.coverage_floor import coverage_floor_violations, coverage_floor_z3
 from feasible.checker.result import Violation
 from feasible.domains.base import register_witness_schema
-from feasible.ir.domain import FCIR, Plan
+from feasible.ir.domain import CompileMode, FCIR, Plan, Rule, Severity
 
 # the sentinel a missing param collapses to, so the floor FAILS CLOSED (a missing
 # floor must never read as "no floor required"). A deterministic single violation.
@@ -255,52 +255,133 @@ def _plan_outage_intervals(plan: Plan) -> dict[str, list[tuple[int, int]]]:
     return plan_outage
 
 
-def _redundancy_floor_violations(plan: Plan, ir: FCIR) -> list[Violation]:
-    """TOTAL param reads: any missing required param -> ONE deterministic violation
-    (passed=False), never a KeyError, never a silent pass."""
-    r = ir.rule("dc:redundancy_floor")
-    if r is None:
-        return []
-    p = r.params
-    for key in ("group_id", "units", "floor", "horizon"):  # required
-        if p.get(key, _MISSING) is _MISSING:
-            return [_missing_param_violation("dc:redundancy_floor", key)]
-    gid, units, floor, horizon = p["group_id"], list(p["units"]), int(p["floor"]), int(p["horizon"])
-    maintenance = p.get("maintenance", {})  # optional -> default empty (total)
-    plan_outage = _plan_outage_intervals(plan)
+def _facility_block(ir: FCIR) -> dict[str, Any]:
+    """The structural descriptor carried on the first redundancy/facility rule
+    (mirror ``instance._facility_block``). TOTAL: an IR without one yields ``{}``."""
+    for r in ir.rules:
+        fac = r.params.get("facility")
+        if isinstance(fac, dict):
+            return fac
+    return {}
+
+
+def _task_outage_intervals(plan: Plan, ir: FCIR) -> dict[str, list[tuple[int, int]]]:
+    """The HERO mechanism (Task 4): a PLAN-scheduled maintenance TASK derates the
+    redundancy ``unit`` it runs on for ``[start, start+duration)``.
+
+    The maintenance-task <-> unit linkage lives in the facility block
+    (``maintenance_tasks: [{id, path, duration, unit}]``); the op is ``task:<id>``
+    on its ``path`` machine; the start is the plan's schedulable decision and the
+    duration is the packed op's. TOTAL: a task absent from the plan, with no
+    ``unit`` linkage, or whose op is missing is SKIPPED (never a KeyError) — it
+    simply contributes no outage."""
+    facility = _facility_block(ir)
+    tasks = facility.get("maintenance_tasks", [])
+    if not isinstance(tasks, list):
+        return {}
+    # op_id -> instance op duration (TOTAL: missing -> skip).
+    op_duration = {op.op_id: int(op.duration) for op in ir.instance.operations}
+    out: dict[str, list[tuple[int, int]]] = {}
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        unit = t.get("unit")
+        if unit is None:
+            continue                       # a task with no redundancy linkage derates nothing
+        op_id = f"task:{t.get('id')}"
+        if op_id not in plan.assignments or op_id not in op_duration:
+            continue                       # not scheduled / no op -> no outage (total)
+        start = plan.start(op_id)
+        dur = op_duration[op_id]
+        if dur <= 0:
+            continue                       # a zero-length task removes the unit for no time
+        out.setdefault(str(unit), []).append((start, start + dur))
+    return out
+
+
+def _group_available_by_t(
+    plan: Plan, ir: FCIR, params: dict[str, Any],
+    task_outage: dict[str, list[tuple[int, int]]],
+    plan_outage: dict[str, list[tuple[int, int]]],
+) -> tuple[str, int, int, dict[int, int]]:
+    """Per-group per-timestep AVAILABLE count, fail-closed on missing params.
+
+    A unit is DOWN at ``t`` if any of (a) a FIXED instance maintenance interval,
+    (b) a PLAN-scheduled maintenance TASK derating it, or (c) a ``plan_outage:``
+    cleanout covers ``t``. ``available`` = installed units NOT down (floor is over
+    AVAILABLE, never installed). Missing ``floor`` -> ``1<<30`` (unsatisfiable,
+    fail-closed); missing ``units``/``horizon`` -> empty/0 (fail-closed via the
+    kernel's ``range(horizon)`` + ``get(t, 0)``)."""
+    gid = str(params.get("group_id", "?"))
+    units = list(params.get("units", []))
+    floor = int(params.get("floor", 1 << 30))   # missing floor -> unsatisfiable
+    horizon = int(params.get("horizon", 0))
+    maintenance = params.get("maintenance", {})
     avail: dict[int, int] = {}
     for t in range(horizon):
         n = 0
         for u in units:
             down = any(a <= t < b for (a, b) in maintenance.get(u, []))
-            down = down or any(a <= t < b for (a, b) in plan_outage.get(u, []))
-            if not down:
-                n += 1
-        avail[t] = n
-    return coverage_floor_violations(avail, floor, gid, horizon)
-
-
-def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]]:
-    """Used by the Z3 mirror + the objective seam. Reads params TOTALLY; a missing
-    required param collapses the group to floor-breaching emptiness (fail-closed)."""
-    r = ir.rule("dc:redundancy_floor")
-    p = r.params if r is not None else {}
-    gid = p.get("group_id", "?")
-    units = list(p.get("units", []))
-    floor = int(p.get("floor", 1 << 30))   # missing floor -> unsatisfiable (fail-closed)
-    horizon = int(p.get("horizon", 0))
-    maintenance = p.get("maintenance", {})
-    plan_outage = _plan_outage_intervals(plan)
-    avail: dict[int, int] = {}
-    for t in range(horizon):
-        n = 0
-        for u in units:
-            down = any(a <= t < b for (a, b) in maintenance.get(u, []))
+            down = down or any(a <= t < b for (a, b) in task_outage.get(u, []))
             down = down or any(a <= t < b for (a, b) in plan_outage.get(u, []))
             if not down:
                 n += 1
         avail[t] = n
     return gid, floor, horizon, avail
+
+
+def _redundancy_groups(ir: FCIR) -> list[Rule]:
+    """Every ``dc:redundancy_floor`` rule (multi-group). A unit shared across two
+    groups counts DOWN in BOTH — each group is evaluated independently."""
+    return [r for r in ir.rules if r.rule_id == "dc:redundancy_floor"]
+
+
+def _redundancy_floor_violations(plan: Plan, ir: FCIR) -> list[Violation]:
+    """TOTAL param reads + MULTI-GROUP (Task 4): one ``coverage_floor_violations``
+    call per ``dc:redundancy_floor`` rule. Any missing required param on a group ->
+    ONE deterministic violation for THAT group (passed=False), never a KeyError,
+    never a silent pass. Down-intervals merge fixed maintenance, PLAN-scheduled
+    task derating, and ``plan_outage:`` cleanouts."""
+    task_outage = _task_outage_intervals(plan, ir)
+    plan_outage = _plan_outage_intervals(plan)
+    out: list[Violation] = []
+    for r in _redundancy_groups(ir):
+        if r.severity != Severity.HARD or r.compile_mode != CompileMode.PLAN_CONSTRAINT:
+            continue                        # only active hard plan-constraint groups
+        p = r.params
+        missing = next((k for k in ("group_id", "units", "floor", "horizon")
+                        if p.get(k, _MISSING) is _MISSING), None)
+        if missing is not None:
+            out.append(_missing_param_violation("dc:redundancy_floor", missing))
+            continue
+        gid, floor, horizon, avail = _group_available_by_t(
+            plan, ir, p, task_outage, plan_outage)
+        out += coverage_floor_violations(avail, floor, gid, horizon)
+    return out
+
+
+def _redundancy_groups_available(
+    plan: Plan, ir: FCIR,
+) -> list[tuple[str, int, int, dict[int, int]]]:
+    """Per-group ``(group_id, floor, horizon, available_by_t)`` for EVERY redundancy
+    group — used by the Z3 mirror + the objective seam. Reads params TOTALLY (a
+    missing required param collapses that group to floor-breaching emptiness)."""
+    task_outage = _task_outage_intervals(plan, ir)
+    plan_outage = _plan_outage_intervals(plan)
+    return [
+        _group_available_by_t(plan, ir, r.params, task_outage, plan_outage)
+        for r in _redundancy_groups(ir)
+    ]
+
+
+def _available_by_t(plan: Plan, ir: FCIR) -> tuple[str, int, int, dict[int, int]]:
+    """Back-compat single-group view (the FIRST redundancy group), used by the
+    objective seam's spike proxy. Multi-group consumers use
+    ``_redundancy_groups_available``. Reads params TOTALLY (fail-closed)."""
+    groups = _redundancy_groups_available(plan, ir)
+    if groups:
+        return groups[0]
+    return "?", 1 << 30, 0, {}
 
 
 class DatacenterVerifier:
@@ -322,7 +403,9 @@ class DatacenterVerifier:
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         out: list[Violation] = []
-        if ir.has_active("dc:redundancy_floor"):
+        # MULTI-GROUP (Task 4): _redundancy_floor_violations iterates EVERY
+        # dc:redundancy_floor rule, filtering active/HARD/PLAN_CONSTRAINT per group.
+        if any(r.rule_id == "dc:redundancy_floor" for r in ir.rules):
             out += _redundancy_floor_violations(plan, ir)  # TOTAL param reads (B-5)
         if ir.has_active("dc:maintenance_window"):
             out += _maintenance_window_violations(plan, ir)  # PLAN-DEPENDENT; TOTAL reads (B-5)
@@ -333,13 +416,15 @@ class DatacenterVerifier:
     def z3_encode(self, plan: Plan, ir: FCIR) -> "z3.Solver":
         s = z3.Solver()
         s.set(unsat_core=True)
-        if ir.has_active("dc:redundancy_floor"):
-            gid, floor, horizon, avail = _available_by_t(plan, ir)
-            a = {t: z3.Int(f"avail_{gid}_{t}") for t in range(horizon)}
-            for t in range(horizon):
-                s.add(a[t] == avail[t])
-            for t, expr in enumerate(coverage_floor_z3(a, floor, horizon)):
-                s.assert_and_track(expr, f"dc:redundancy_floor:{gid}:{t}")
+        # MULTI-GROUP (Task 4): one tracked block per redundancy group; a unit shared
+        # across groups appears in BOTH groups' availability (code-disjoint from CP-SAT).
+        if any(r.rule_id == "dc:redundancy_floor" for r in ir.rules):
+            for gid, floor, horizon, avail in _redundancy_groups_available(plan, ir):
+                a = {t: z3.Int(f"avail_{gid}_{t}") for t in range(horizon)}
+                for t in range(horizon):
+                    s.add(a[t] == avail[t])
+                for t, expr in enumerate(coverage_floor_z3(a, floor, horizon)):
+                    s.assert_and_track(expr, f"dc:redundancy_floor:{gid}:{t}")
         if ir.has_active("dc:maintenance_window"):
             _maintenance_window_z3(s, plan, ir)
         if ir.has_active("dc:power_cap"):
