@@ -15,7 +15,10 @@ _DOMAINS: dict[str, tuple[Domain, DomainVerifier]] = {}
 # APPENDS its package path here (one line) when it forks against this seam, so the
 # facade/verify path resolves it in a fresh process without the caller having
 # imported the package directly. Order is irrelevant (registration is keyed by id).
-_DOMAIN_PACKAGES: tuple[str, ...] = ("feasible.domains.manufacturing",)
+_DOMAIN_PACKAGES: tuple[str, ...] = (
+    "feasible.domains.manufacturing",
+    "feasible.domains.datacenter",
+)
 
 
 def register_domain(domain_id: str, domain: Domain, verifier: DomainVerifier) -> None:
