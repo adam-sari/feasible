@@ -73,6 +73,20 @@ def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return a_start < b_end and b_start < a_end
 
 
+def _parse_cleanout_reason(reason: str) -> tuple[str, str] | None:
+    """Parse a materialized-cleanout reason ``"cleanout {i}->{j}"`` into ``(i, j)``
+    so ``_pin_to_plan`` can address the matching free ``cs[(i,j,mc)]`` var. Returns
+    ``None`` for any reason not in that canonical shape."""
+    prefix = "cleanout "
+    if not reason.startswith(prefix) or "->" not in reason:
+        return None
+    body = reason[len(prefix):]
+    i, _, j = body.partition("->")
+    if not i or not j:
+        return None
+    return i, j
+
+
 class ManufacturingVerifier:
     """The manufacturing ``DomainVerifier`` predicate bundle (relocated bodies)."""
 
@@ -326,17 +340,269 @@ class ManufacturingVerifier:
 
         return s
 
-    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
-        """FREE-SEARCH Z3 strict-improvement encoding (T1.2 lands the real body).
+    # --------------------------------------------------------------------- #
+    # T1.2: FREE-SEARCH Z3 independent-optimality (two-layer encoding).      #
+    #                                                                        #
+    # The encoding is CODE-DISJOINT from CP-SAT (no ``cpsat.py`` import — the #
+    # arithmetic is re-expressed in z3-py, integers only). It mirrors        #
+    # ``cpsat.build_model``: immediate same-machine adjacency ``adj(i,j,mc)`` #
+    # (the free-search equivalent of the AddCircuit arc literal, replacing    #
+    # the plan-readout ``machine_sequence``), a MATERIALIZED free cleanout    #
+    # start ``cs`` per changeover (disjoint from maintenance, night-banded —  #
+    # never a gap-only assertion), and the immediate-adjacency changeover     #
+    # (no every-ordered-pair over-count).                                     #
+    # --------------------------------------------------------------------- #
 
-        T1.1 STUB: returns ``None`` (honest opt-out), so the solver-agnostic
-        orchestrator never returns ``corroborated`` from a stub (it maps ``None ->
-        skipped``). The real two-layer FREE-search FJSP encoding — immediate
-        same-machine adjacency ``adj(i,j,mc)``, a materialized cleanout disjoint
-        from maintenance, the modular night-band, and the two-level lexicographic
-        strict-improvement disjunction mirroring ``optimality.py`` — replaces this
-        stub in T1.2."""
-        return None
+    def _build_free_vars(self, ir: FCIR) -> dict[str, Any]:
+        """Construct the FREE decision vars + the structural primitives shared by
+        every layer/helper. Returns a dict carrying the var maps plus the
+        ``adj`` predicate factory, the req>0 ``setup_pairs``, the per-machine op
+        lists, and the horizon ``H`` — so the feasibility layer, the objective
+        layer, and the white-box helpers all address the SAME vars."""
+        inst = ir.instance
+        H = inst.horizon
+
+        start: dict[str, Any] = {op.op_id: z3.Int(f"start_{op.op_id}") for op in inst.operations}
+        end: dict[str, Any] = {op.op_id: z3.Int(f"end_{op.op_id}") for op in inst.operations}
+        # machine-assignment Bools, one per (op, eligible machine)
+        mp: dict[tuple[str, str], Any] = {}
+        for op in inst.operations:
+            for mc in op.eligible_machines:
+                mp[(op.op_id, mc)] = z3.Bool(f"mp_{op.op_id}_{mc}")
+
+        # ops eligible on each machine (free-search analogue of machine_sequence's domain)
+        ops_on: dict[str, list[str]] = {mc: [] for mc in inst.machines}
+        for op in inst.operations:
+            for mc in op.eligible_machines:
+                ops_on[mc].append(op.op_id)
+
+        def adj(i: str, j: str, mc: str) -> Any:
+            # i immediately precedes j on machine mc: both on mc, i before j, and
+            # NO third op k on mc sits between them. The free-search equivalent of
+            # two ops being consecutive in machine_sequence(plan, mc, ir) — the
+            # order is a DECISION, so "no op between" is an explicit guard.
+            between_k = [
+                z3.And(mp[(k, mc)], end[i] <= start[k], end[k] <= start[j])
+                for k in ops_on[mc] if k != i and k != j
+            ]
+            guard = z3.Not(z3.Or(*between_k)) if between_k else z3.BoolVal(True)
+            return z3.And(mp[(i, mc)], mp[(j, mc)], end[i] <= start[j], guard)
+
+        # the req>0 changeover pairs (the materialized-cleanout / changeover set)
+        setup_pairs: list[tuple[str, str, str, int]] = []
+        cs: dict[tuple[str, str, str], Any] = {}
+        for mc in inst.machines:
+            here = ops_on[mc]
+            for i in here:
+                for j in here:
+                    if i == j:
+                        continue
+                    req = inst.setup(_family(ir, i), _family(ir, j))
+                    if req > 0:
+                        setup_pairs.append((i, j, mc, req))
+                        cs[(i, j, mc)] = z3.Int(f"cs_{i}_{j}_{mc}")
+
+        return {
+            "start": start, "end": end, "mp": mp, "cs": cs,
+            "ops_on": ops_on, "adj": adj, "setup_pairs": setup_pairs, "H": H,
+        }
+
+    def _feasibility_only_encode(self, ir: FCIR) -> tuple["z3.Solver", dict[str, Any]]:
+        """The FULL hard-constraint encoding over the FREE decision vars — i.e.
+        EVERYTHING except the objective vars (``wt``, ``co``) and the
+        strict-improvement disjunction. Returns the solver AND the var maps so the
+        white-box helpers (``_pin_to_plan`` / ``_decode_witness``) can address the
+        free vars. The load-bearing split (RC-1): the region test (c) pins to THIS
+        layer, removing the objective confound."""
+        inst = ir.instance
+        v = self._build_free_vars(ir)
+        start, end, mp, cs = v["start"], v["end"], v["mp"], v["cs"]
+        adj, setup_pairs = v["adj"], v["setup_pairs"]
+        H = v["H"]
+
+        night_rule = ir.rule("R-6.1-NIGHT-CLEANOUT")
+        night_active = ir.has_active("R-6.1-NIGHT-CLEANOUT")
+        night = {**DAY_DEFAULT, **(night_rule.params if night_rule else {})}
+
+        s = z3.Solver()
+
+        # end == start + duration; start >= 0
+        for op in inst.operations:
+            s.add(end[op.op_id] == start[op.op_id] + op.duration)
+            s.add(start[op.op_id] >= 0)
+            # EXACTLY-ONE eligible machine
+            lits = [(mp[(op.op_id, mc)], 1) for mc in op.eligible_machines]
+            s.add(z3.PbEq(lits, 1))
+
+        # R-ROUTING: consecutive ops in a job run in seq order (machine-independent)
+        if ir.has_active("R-ROUTING"):
+            by_job: dict[str, list] = {}
+            for o in inst.operations:
+                by_job.setdefault(o.job_id, []).append(o)
+            for ops_j in by_job.values():
+                ordered = sorted(ops_j, key=lambda o: o.seq)
+                for a, b in zip(ordered, ordered[1:]):
+                    s.add(start[b.op_id] >= end[a.op_id])
+
+        # R-NOOVERLAP: same-machine ops pairwise disjoint when co-assigned
+        if ir.has_active("R-NOOVERLAP"):
+            for mc in inst.machines:
+                here = v["ops_on"][mc]
+                for a_i in range(len(here)):
+                    for b_i in range(a_i + 1, len(here)):
+                        a, b = here[a_i], here[b_i]
+                        s.add(z3.Implies(
+                            z3.And(mp[(a, mc)], mp[(b, mc)]),
+                            z3.Or(end[a] <= start[b], end[b] <= start[a]),
+                        ))
+
+        # R-SETUP: changeover via immediate adjacency + a MATERIALIZED cleanout cs,
+        # the cleanout interval [cs, cs+req) disjoint from every maintenance window.
+        if ir.has_active("R-SETUP"):
+            for (i, j, mc, req) in setup_pairs:
+                a = adj(i, j, mc)
+                csv = cs[(i, j, mc)]
+                s.add(z3.Implies(a, end[i] <= csv))            # cleanout after op i
+                s.add(z3.Implies(a, csv + req <= start[j]))    # cleanout before op j
+                if ir.has_active("R-MAINT"):
+                    for (m_mc, m_start, m_end) in inst.maintenance:
+                        if m_mc == mc:
+                            s.add(z3.Implies(a, z3.Or(csv + req <= m_start, csv >= m_end)))
+
+        # R-MAINT (ops): each op on mc disjoint from its maintenance windows
+        if ir.has_active("R-MAINT"):
+            for (m_mc, m_start, m_end) in inst.maintenance:
+                for op in inst.operations:
+                    if m_mc in op.eligible_machines:
+                        s.add(z3.Implies(
+                            mp[(op.op_id, m_mc)],
+                            z3.Or(end[op.op_id] <= m_start, start[op.op_id] >= m_end),
+                        ))
+
+        # R-SHIFT: every op stays within the operating horizon
+        if ir.has_active("R-SHIFT"):
+            for op in inst.operations:
+                s.add(z3.And(start[op.op_id] >= 0, end[op.op_id] <= H))
+
+        # R-6.1-NIGHT-CLEANOUT: the MATERIALIZED cleanout's minute-of-day in the day band
+        if night_active and ir.has_active("R-SETUP"):
+            for (i, j, mc, req) in setup_pairs:
+                a = adj(i, j, mc)
+                mod = cs[(i, j, mc)] % 1440
+                s.add(z3.Implies(a, z3.And(mod >= night["day_start"], mod + req <= night["day_end"])))
+
+        return s, v
+
+    def independent_optimality_encode(self, ir: FCIR, V: tuple[int, ...]) -> "z3.Solver | None":
+        """FREE-SEARCH Z3 strict-improvement encoding (the layer ON TOP of the
+        feasibility-only layer): the full hard-constraint set over FREE vars PLUS
+        the objective vars (``wt``, immediate-adjacency ``co``) PLUS the two-level
+        lexicographic strict-improvement disjunction ``Or(wt<v0, And(wt==v0,
+        co<v1))``. UNSAT => no feasible plan beats V => corroborated.
+
+        The SEAM imposes no arity: a non-2-level ``V`` is the honest ``None``
+        opt-out (the FJSP objective has exactly two levels; a deeper objective is
+        not a manufacturing objective). This matches the seam's documented
+        ``None`` opt-out and the T1.1 variable-length seam contract; the encoding
+        is well-defined only for the 2-tuple."""
+        if len(V) != 2:
+            return None
+        inst = ir.instance
+        s, v = self._feasibility_only_encode(ir)
+        start, end, adj = v["start"], v["end"], v["adj"]
+
+        # wt == priority-weighted tardiness over the free plan
+        wt_terms = []
+        for job in inst.jobs:
+            last_op = max((o for o in inst.operations if o.job_id == job.id), key=lambda o: o.seq)
+            tard = z3.Int(f"tard_{job.id}")
+            s.add(tard >= end[last_op.op_id] - job.due_date)
+            s.add(tard >= 0)
+            wt_terms.append((4 - job.priority) * tard)
+        wt = z3.Int("wt")
+        s.add(wt == (z3.Sum(wt_terms) if wt_terms else 0))
+
+        # co == immediate-adjacency changeover (NO every-ordered-pair over-count)
+        co = z3.Int("co")
+        co_terms = [z3.If(adj(i, j, mc), req, 0) for (i, j, mc, req) in v["setup_pairs"]]
+        s.add(co == (z3.Sum(co_terms) if co_terms else 0))
+
+        # the two-level lexicographic strict-improvement disjunction (mirror
+        # optimality.py:30-37): require SOME strict improvement over V.
+        v0, v1 = V
+        better_l1 = wt < v0
+        better_l2 = z3.And(wt == v0, co < v1)
+        s.add(z3.Or(better_l1, better_l2))
+        return s
+
+    # ---- white-box helpers for the region-correspondence test (pure, integers) #
+
+    def _changeover_of(self, plan: Plan, ir: FCIR) -> int:
+        """The encoding's IMMEDIATE-adjacency changeover for a concrete plan: the
+        sum of ``setup`` over consecutive same-machine pairs (the consecutive-pair
+        sum the ``co`` objective computes — NOT the every-ordered-pair over-count)."""
+        total = 0
+        for mc in ir.instance.machines:
+            seq = machine_sequence(plan, mc, ir)
+            for i_id, j_id in zip(seq, seq[1:]):
+                total += ir.instance.setup(_family(ir, i_id), _family(ir, j_id))
+        return total
+
+    def _pin_to_plan(self, plan: Plan, ir: FCIR) -> list[Any]:
+        """Constrain the FREE vars of ``_feasibility_only_encode`` to a concrete
+        plan: pin every ``start[i]``, every machine Bool ``mp[(i,mc)]``, and each
+        MATERIALIZED cleanout ``cs[(i,j,mc)]`` to the plan's matching cleanout
+        start. A concrete plan that the closed checker REJECTS becomes UNSAT here
+        (a breached hard rule); a checker-feasible plan stays SAT (the positive
+        control). Pure: returns the assertions, never mutates a solver."""
+        v = self._build_free_vars(ir)
+        start, mp, cs = v["start"], v["mp"], v["cs"]
+        cons: list[Any] = []
+        for op in ir.instance.operations:
+            if op.op_id in plan.assignments:
+                cons.append(start[op.op_id] == plan.start(op.op_id))
+                assigned = plan.machine(op.op_id)
+                for mc in op.eligible_machines:
+                    cons.append(mp[(op.op_id, mc)] == (mc == assigned))
+        # pin each plan cleanout to its matching materialized cs var (by reason+machine)
+        for (mc, cstart, _ce, reason) in plan.cleanouts:
+            pair = _parse_cleanout_reason(reason)
+            if pair is not None and (pair[0], pair[1], mc) in cs:
+                cons.append(cs[(pair[0], pair[1], mc)] == cstart)
+        return cons
+
+    def _decode_witness(self, model: "z3.ModelRef", ir: FCIR) -> Plan:
+        """Read a Z3 model into a concrete ``Plan`` (the SAME shape ``extract_plan``
+        builds) so a witness is checkable by ``feasible.checker.checker.check``
+        without trusting the encoding. A cleanout is emitted for ``(i,j,mc)`` ONLY
+        when the model says ``adj(i,j,mc)`` holds (an adj-FALSE ``cs`` is
+        unconstrained garbage and must NOT pollute the decoded plan)."""
+        v = self._build_free_vars(ir)
+        start, mp, cs, adj = v["start"], v["mp"], v["cs"], v["adj"]
+        assignments: dict[str, tuple[int, str]] = {}
+        for op in ir.instance.operations:
+            st = model.eval(start[op.op_id], model_completion=True).as_long()
+            machine = next(
+                mc for mc in op.eligible_machines
+                if z3.is_true(model.eval(mp[(op.op_id, mc)], model_completion=True))
+            )
+            assignments[op.op_id] = (st, machine)
+        cleanouts: list[tuple[str, int, int, str]] = []
+        for (i, j, mc, req) in v["setup_pairs"]:
+            if z3.is_true(model.eval(adj(i, j, mc), model_completion=True)):
+                cs_val = model.eval(cs[(i, j, mc)], model_completion=True).as_long()
+                cleanouts.append((mc, cs_val, cs_val + req, f"cleanout {i}->{j}"))
+        return Plan(assignments=assignments, cleanouts=cleanouts)
+
+    def _block_model(self, model: "z3.ModelRef") -> Any:
+        """Negate a model over its decision vars so the caller can enumerate
+        DISTINCT witnesses (``s.add(_block_model(m))`` forbids re-finding it)."""
+        terms = []
+        for d in model.decls():
+            val = model[d]
+            if val is not None and d.arity() == 0:
+                terms.append(d() != val)
+        return z3.Or(*terms) if terms else z3.BoolVal(False)
 
     # --------------------------------------------------------------------- #
     # The remaining ``DomainVerifier`` members are relocated behind the seam #
