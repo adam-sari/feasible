@@ -1,0 +1,9 @@
+:root { font-family: system-ui, sans-serif; }
+body { margin: 0; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.pill-pass { background: #d5f5e3; color: #1e8449; }
+.pill-fail { background: #fadbd8; color: #c0392b; }
+.pill-synthetic { background: #fef9e7; color: #b7950b; border: 1px dashed #b7950b; }
+.tab-nav a { margin-right: 12px; }
+.tab-nav a.active { font-weight: 700; }
+.nodata { color: #888; font-style: italic; }
