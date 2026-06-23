@@ -36,11 +36,12 @@ INPUT_SCHEMA_DIGEST = digest_of({
 })
 
 
-# The recompute fns live in ``feasible.solve.orchestrate``; import them LAZILY at
-# call time so populating the registry at ``feasible.domains.manufacturing`` import
-# does NOT pull in ``solve.orchestrate`` (which imports ``checker.checker``, whose
-# own import triggers this registration — a cycle). The fn is the SAME existing
-# helper, resolved by name from the orchestrate module (no re-implementation).
+# Import-style note (cf. ``datacenter/kpi.py``): manufacturing's recompute fns live in
+# ``feasible.solve.orchestrate`` (an out-of-domain module that transitively imports the
+# checker, which triggers THIS registration) — so they MUST be imported LAZILY to break
+# the cycle. The datacenter KPIs source their fns from the datacenter verifier (an
+# IN-package module, no cycle), so that file imports them DIRECTLY at module top. The
+# fn here is the SAME existing helper, resolved by name from orchestrate (no re-impl).
 def _orchestrate_fn(name: str) -> Callable[[FCIR, Plan], int]:
     def _call(ir: FCIR, plan: Plan) -> int:
         from feasible.solve import orchestrate

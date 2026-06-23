@@ -22,6 +22,10 @@ from __future__ import annotations
 
 from feasible.canon.canonical import digest_of
 from feasible.domains.base import KPI_REGISTRY, KpiEntry
+# Import-style note (cf. ``manufacturing/kpi.py``): the datacenter recompute fns live in
+# THIS package's verifier (an in-package module — no import cycle), so they are imported
+# DIRECTLY here. Manufacturing's fns live in the out-of-domain ``solve.orchestrate`` and
+# must be imported LAZILY to break a checker<->domain registration cycle.
 from feasible.domains.datacenter.verifier import maintenance_makespan, stranded_power
 from feasible.ir.domain import FCIR, Instance, Plan
 

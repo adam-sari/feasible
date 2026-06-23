@@ -125,10 +125,6 @@ class DomainVerifier(Protocol):
         encoding (which keeps its own 2-level assertion)."""
         ...
 
-    def kpis(self) -> list[Any]:
-        """Allow-listed (emit-only) KPI recompute fns."""
-        ...
-
     def gotcha_rule_id(self) -> str | None:
         """Which rule the headline gotcha cites (namespaced), or ``None``."""
         ...

@@ -71,12 +71,11 @@ def active_rule_set_digest(ir: FCIR, dropped: list) -> str:
 def _domain_formalization_sets(ir: FCIR) -> tuple[frozenset[str], frozenset[str]]:
     """The ``(evaluated_rule_ids, structural_rule_kinds)`` of ``ir``'s signed
     domain, resolved through the per-domain ``DomainVerifier`` seam (the same
-    delegate pattern ``registry.is_supported`` uses). For manufacturing these are
-    byte-identical to the module-level ``EVALUATED_RULE_IDS`` / ``STRUCTURAL_RULE_KINDS``
-    (``ManufacturingVerifier.evaluated_rule_ids == EVALUATED_RULE_IDS`` and
-    ``.structural_rule_kinds == STRUCTURAL_RULE_KINDS``); a SECOND domain sources
-    ITS own sets, so its formalization leaves are no longer vacuously ``[]``. An
-    unknown domain supports nothing (fail-closed → empty sets)."""
+    delegate pattern ``registry.is_supported`` uses) — the SOLE source of these
+    sets (the old module-level manufacturing-only view was unused and removed). A
+    SECOND domain sources ITS own sets, so its formalization leaves are no longer
+    vacuously ``[]``. An unknown domain supports nothing (fail-closed → empty
+    sets)."""
     try:
         _domain, verifier = get_domain(ir.domain_id)
     except UnknownDomainError:

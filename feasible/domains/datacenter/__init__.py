@@ -11,6 +11,9 @@ DOMAIN_ID = "datacenter"
 # a cert callable). Task 8 populates the real stranded-power / makespan / SLA-penalty
 # recompute fns + version triples (importing ``kpi`` registers
 # ``KPI_REGISTRY["datacenter"]`` as an import side-effect).
+# E402 (import-not-at-top) is intentional: this side-effecting import must run AFTER the
+# ``DOMAIN_ID`` assignment above and the verifier/domain imports it transitively needs —
+# it is sequenced as a side effect, not a top-level dependency.
 import feasible.domains.datacenter.kpi  # noqa: E402,F401  (populates KPI_REGISTRY["datacenter"])
 
 register_domain("datacenter", DatacenterDomain(), DatacenterVerifier())

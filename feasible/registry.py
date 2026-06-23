@@ -13,25 +13,16 @@ rule presented under ``domain_id="datacenter"``) is therefore unsupported and
 fails closed — and an IR whose ``domain_id`` is not registered at all raises
 ``UnsupportedHardRuleError`` (an unknown domain supports nothing).
 
-The module-level ``EVALUATED_RULE_IDS`` / ``STRUCTURAL_RULE_KINDS`` remain the
-manufacturing view (back-compat for ``plan_cert`` cert-reporting leaves) and
-mirror the manufacturing verifier's sets.
+Support is sourced *only* through the per-domain ``DomainVerifier`` seam
+(``evaluated_rule_ids`` / ``structural_rule_kinds``). The cert-reporting leaves in
+``plan_cert`` read the same per-domain sets via ``_domain_formalization_sets`` — there
+is no module-level manufacturing-only view (it was unused and removed post-v0.2).
 """
 from __future__ import annotations
 
 import feasible.domains.manufacturing  # noqa: F401  (registers the manufacturing domain)
 from feasible.domains import UnknownDomainError, get_domain
 from feasible.ir.domain import FCIR, Rule
-
-# rule_ids the checker / compiler / Z3 explicitly evaluate (1:1 with kind in v1).
-# The manufacturing view, mirrored from the manufacturing verifier; retained for
-# the cert-reporting leaves in ``plan_cert`` (back-compat).
-EVALUATED_RULE_IDS: frozenset[str] = frozenset({
-    "R-ROUTING", "R-NOOVERLAP", "R-SETUP", "R-MAINT", "R-SHIFT", "R-6.1-NIGHT-CLEANOUT",
-})
-
-# kinds that need no predicate — the interval model + no-overlap guarantee them
-STRUCTURAL_RULE_KINDS: frozenset[str] = frozenset({"non_preemption"})
 
 
 class UnsupportedHardRuleError(ValueError):

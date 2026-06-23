@@ -974,14 +974,6 @@ class DatacenterVerifier:
         which keeps the frozen ``DomainVerifier.compile`` signature unwidened."""
         return _dc_build_model(ir)
 
-    def kpis(self) -> list[Any]:
-        """The allow-listed (emit-only) KPI recompute entries (Task 8). ``verify``
-        resolves the fn from ``KPI_REGISTRY["datacenter"]``, never from a cert field;
-        this is the emit-side view of the same statically-registered table."""
-        from feasible.domains.base import KPI_REGISTRY
-
-        return [{"key": key, **entry} for key, entry in KPI_REGISTRY[self.domain_id].items()]
-
     # --- govern hooks (Task 8) — reached by govern/coverage / govern/backtranslate /
     # govern/conflict via the IR's SIGNED domain_id (those modules dispatch per-domain).
 

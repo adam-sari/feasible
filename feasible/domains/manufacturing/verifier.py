@@ -368,17 +368,6 @@ class ManufacturingVerifier:
 
         return optimality_tripwire(ir, objective)
 
-    def kpis(self) -> list[Any]:
-        """The allow-listed (emit-only) KPI recompute entries, keyed by KPI name.
-
-        Returns the manufacturing ``KPI_REGISTRY`` entries (the three existing
-        recompute fns + their version triple). ``verify`` resolves the fn from the
-        registry, never from a cert field; this is the emit-side view of the same
-        statically-registered table."""
-        from feasible.domains.base import KPI_REGISTRY
-
-        return [{"key": key, **entry} for key, entry in KPI_REGISTRY[self.domain_id].items()]
-
     def gotcha_rule_id(self) -> str | None:
         """The single rule the headline incumbent-A gotcha cites: the night-shift
         sanitation ban (``R-6.1-NIGHT-CLEANOUT``). ``verify`` asserts the cert's
