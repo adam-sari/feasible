@@ -91,6 +91,11 @@ def oracle_surface(rp: dict, pc: dict) -> dict:
         # the per-domain objective LABELS (Spec 0.5 T3 signed leaf), re-derived in
         # verify + read by render_html.
         "objective_labels": pc["claims"]["optimality"]["objective_labels"]["value"],
+        # T1.5: the additive disjoint-solver corroboration leaf (value object
+        # {"solver":"z3-smt","verdict":...}) — for datacenter this is the HEADLINE
+        # upgrade: where the same-engine tripwire OPTS OUT, a disjoint engine (Z3/SMT)
+        # now gives REAL optimality backing. SOLVER-REPORTED at emit.
+        "disjoint_solver_corroboration": pc["claims"]["optimality"]["disjoint_solver_corroboration"]["value"],
         "kpi_vs_incumbent_B": pc["kpi_vs_incumbent_B"],
         "kpi_function_refs": pc["kpi_function_refs"],
         "incumbent_A_failure": pc["incumbent_A_failure"],

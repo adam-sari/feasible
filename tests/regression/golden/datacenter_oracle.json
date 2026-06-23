@@ -131,6 +131,10 @@
     "stranded_power_kw",
     "makespan"
   ],
+  "disjoint_solver_corroboration": {
+    "solver": "z3-smt",
+    "verdict": "corroborated"
+  },
   "rule_pack_digest": "7b1694927bb7c5a1c9fced4a9900e023dbcdbab65609aa144a98f3312d828514",
   "rule_pack_ref": {
     "rule_pack_cert_signature_ref": null,

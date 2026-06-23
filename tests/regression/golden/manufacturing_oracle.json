@@ -97,6 +97,10 @@
     "weighted_tardiness",
     "total_changeover"
   ],
+  "disjoint_solver_corroboration": {
+    "solver": "z3-smt",
+    "verdict": "corroborated"
+  },
   "kpi_vs_incumbent_B": {
     "weighted_tardiness": {
       "optimized": 0,

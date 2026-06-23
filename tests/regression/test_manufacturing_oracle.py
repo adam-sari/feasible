@@ -66,6 +66,11 @@ def oracle_surface(rp: dict, pc: dict) -> dict:
         # the one additive signed field in Spec 0.5 (Task 3): the per-domain
         # objective LABELS, re-derived in verify + read by render_html.
         "objective_labels": pc["claims"]["optimality"]["objective_labels"]["value"],
+        # T1.5: the additive disjoint-solver corroboration leaf (value object
+        # {"solver":"z3-smt","verdict":...}) — a SECOND, DISJOINT engine (Z3/SMT)
+        # corroborates the CP-SAT optimum; SOLVER-REPORTED at emit (same trust class
+        # as tripwire_passed). Projected exactly as objective_labels was in Spec 0.5.
+        "disjoint_solver_corroboration": pc["claims"]["optimality"]["disjoint_solver_corroboration"]["value"],
         "kpi_vs_incumbent_B": pc["kpi_vs_incumbent_B"],
         "kpi_function_refs": pc["kpi_function_refs"],
         "incumbent_A_failure": pc["incumbent_A_failure"],
