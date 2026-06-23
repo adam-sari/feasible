@@ -20,7 +20,14 @@ class _DatacenterDomainStub:
         raise NotImplementedError
 
     def policy(self):
-        return None
+        # Task 8: the signed conflict policy this domain certifies under. Surfaced so
+        # the per-domain trusted-policy registry (``trusted_policy_set``) admits it
+        # (the redundancy floor IS the SAFETY_SANITATION class — B-3 — so the guard
+        # protects it and an inverted policy is rejected). Lazy import to avoid a
+        # policy<->domain import cycle.
+        from feasible.conflict.policy import DATACENTER_POLICY
+
+        return DATACENTER_POLICY
 
     def viz_meta(self):
         return {}
@@ -55,10 +62,10 @@ from feasible.domains.datacenter.verifier import DatacenterVerifier
 DOMAIN_ID = "datacenter"
 
 # ``emit_plan_cert`` / ``verify_plan_cert`` resolve ``KPI_REGISTRY[domain_id]`` (never
-# a cert callable). The spike registers an EMPTY (but present) datacenter KPI table so
-# the frozen cert path resolves it without a KeyError; Task 8 populates the real
-# stranded-power / makespan / SLA-penalty recompute fns + version triples.
-KPI_REGISTRY.setdefault("datacenter", {})
+# a cert callable). Task 8 populates the real stranded-power / makespan / SLA-penalty
+# recompute fns + version triples (importing ``kpi`` registers
+# ``KPI_REGISTRY["datacenter"]`` as an import side-effect).
+import feasible.domains.datacenter.kpi  # noqa: E402,F401  (populates KPI_REGISTRY["datacenter"])
 
 register_domain("datacenter", _DatacenterDomainStub(), DatacenterVerifier())
 

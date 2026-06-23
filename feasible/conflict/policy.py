@@ -52,6 +52,30 @@ MANUFACTURING_POLICY = ConflictPolicy(
     ],
 )
 
+# The datacenter capacity & maintenance-planning policy (Track B, Task 8).
+#
+# CRITICAL (B-3): the N+1/2N redundancy floor's ``resolution_class`` is LITERALLY
+# ``SAFETY_SANITATION`` — NOT a bespoke ``REDUNDANCY`` class. The frozen
+# ``no_permission_outranks_safety`` guard keys ONLY on ``SAFETY_CLASS_ID ==
+# "SAFETY_SANITATION"`` (it checks ``all(c.priority <= policy.priority(
+# "SAFETY_SANITATION"))``). A bespoke ``REDUNDANCY`` class would satisfy that guard
+# VACUOUSLY (the guard never inspects it), so a policy demoting redundancy below an
+# acceleration class would be SILENTLY ADMITTED into ``trusted_policy_set()``. By
+# making the N+1/2N floor THE ``SAFETY_SANITATION`` class (its ``human_label`` names
+# it "Redundancy / N+1 / 2N safety floor"), the guard's ``<=`` actually protects
+# redundancy. No acceleration/efficiency class outranks it (50, 10 < 100), so
+# ``no_permission_outranks_safety(DATACENTER_POLICY) is True``.
+DATACENTER_POLICY = ConflictPolicy(
+    policy_id="datacenter_v1",
+    version=1,
+    class_priorities=[
+        ClassPriority(class_id="SAFETY_SANITATION", human_label="Redundancy / N+1 / 2N safety floor", priority=100),
+        ClassPriority(class_id="HARD_AVAILABILITY_MAINTENANCE", human_label="Hard maintenance availability", priority=90),
+        ClassPriority(class_id="ACCELERATION", human_label="Commissioning acceleration", priority=50),
+        ClassPriority(class_id="EFFICIENCY", human_label="Stranded-power efficiency", priority=10),
+    ],
+)
+
 # The class id whose priority every other class must NOT strictly exceed: the safety /
 # sanitation obligation that the "safety wins / permission dropped" invariant protects.
 SAFETY_CLASS_ID = "SAFETY_SANITATION"

@@ -873,9 +873,14 @@ class DatacenterVerifier:
     # require a predicate, but a closed/total checker + Z3 mirror STILL run.
     structural_rule_kinds: frozenset[str] = frozenset({"power_cap", "anti_affinity"})
     # the COMPLETE set of rule_ids this domain owns (cross-domain isolation): the
-    # evaluated ids + the structural ids.
+    # evaluated ids + the structural ids + the conflict-only acceleration permission
+    # (``dc:accel-skip-redundancy``, B-6) + the §5.2-equivalent mis-extraction id
+    # (``dc:over-broad-maintenance``, corrected-and-retained in the governed pack, so
+    # it appears in a verified rule-pack cert and must pass the foreign-id guard). All
+    # ``dc:`` namespaced -> pairwise-disjoint from manufacturing's ``R-*``.
     known_rule_ids: frozenset[str] = evaluated_rule_ids | frozenset(
-        {"dc:power_cap", "dc:anti_affinity"})
+        {"dc:power_cap", "dc:anti_affinity",
+         "dc:accel-skip-redundancy", "dc:over-broad-maintenance"})
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         out: list[Violation] = []
@@ -952,16 +957,96 @@ class DatacenterVerifier:
         return _dc_build_model(ir)
 
     def kpis(self) -> list[Any]:
-        return []
+        """The allow-listed (emit-only) KPI recompute entries (Task 8). ``verify``
+        resolves the fn from ``KPI_REGISTRY["datacenter"]``, never from a cert field;
+        this is the emit-side view of the same statically-registered table."""
+        from feasible.domains.base import KPI_REGISTRY
+
+        return [{"key": key, **entry} for key, entry in KPI_REGISTRY[self.domain_id].items()]
+
+    # --- govern hooks (Task 8) — reached by govern/coverage / govern/backtranslate /
+    # govern/conflict via the IR's SIGNED domain_id (those modules dispatch per-domain).
 
     def classify_segment(self, seg: Any) -> str:
+        """The datacenter normativity taxonomy (deterministic keyword heuristic).
+
+        A HARD deontic obligation ALWAYS wins (the omission moat must not fail OPEN —
+        mirror manufacturing's invariant). B-9: the pinned redundancy sentence
+        ("...must at all times maintain N+1 redundancy...; maintenance shall not reduce
+        ...below the N+1 floor.") classifies ``hard_obligation`` — the ``must``/``shall``
+        obligation operator wins even though the sentence also contains ``shall not`` —
+        so a coverage-RED guard dropping the floor clause provably goes RED."""
+        text = seg.text.strip().lower()
+        if seg.text.lstrip().startswith("#"):
+            return "metadata"
+        if not text:
+            return "boilerplate"
+        # the obligation operator (a HARD requirement) — wins over prohibition keywords
+        # so the redundancy sentence (must/shall) is hard_obligation (B-9 deontic-wins).
+        obligation = any(k in text for k in ["must", "shall", "is required", "are required"])
+        prohibition = any(k in text for k in ["may not", "must not", "shall not", "no single"])
+        conditional = "when " in text or "if " in text
+        if obligation:
+            return "conditional_obligation" if conditional else "hard_obligation"
+        if prohibition:
+            return "hard_prohibition"
+        if any(k in text for k in ["preferred", "are expected", "priority"]):
+            return "soft_target"
         return "boilerplate"
 
     def back_translate(self, rule: Any) -> str:
-        return rule.rule_id
+        """The datacenter NL renderer keyed by ``rule.kind``."""
+        body = {
+            "redundancy_floor": "the facility must maintain the N+1/2N redundancy floor at every timestep",
+            "power_cap": "a feed's aggregate rack draw must stay within its certified cap",
+            "maintenance_window": "a maintenance task must not run inside a posted change-freeze window",
+            "anti_affinity": "replicas must not share a power or cooling fault domain",
+            "permission": "commissioning may proceed without holding the redundancy floor",
+            "non_preemption": (
+                "an allergen-style maintenance lock spans the fill operation"
+                if rule.params.get("scope") == "fill_op"
+                else "a maintenance lock spans the whole line (over-broad)"
+            ),
+        }.get(rule.kind)
+        return body or f"rule {rule.rule_id}"
 
-    def conflict_realizable(self, ir: Any, permission: Any) -> bool:
+    def conflict_realizable(self, ir: FCIR, permission: Rule) -> bool:
+        """B-6: a CLOSED, instance-grounded realizability predicate for the
+        acceleration permission. The acceleration permission and the redundancy_floor
+        obligation are jointly UNSAT iff the permission's scope names a REAL floored
+        group with a real installed member whose removal over the window would breach.
+
+        Reads the scope keys from the permission's PINNED params
+        (``target_rule``/``group_id``/``units``/``window``): the targeted obligation
+        must be an ACTIVE ``dc:redundancy_floor`` group, the permission's group_id must
+        match it, and at least one of the permission's named units must actually be an
+        installed member of that group (so the scope is non-vacuous). TOTAL param reads
+        (a missing key fails closed -> not realizable)."""
+        target = permission.params.get("target_rule")
+        if target != "dc:redundancy_floor":
+            return False
+        gid = permission.params.get("group_id")
+        perm_units = set(str(u) for u in permission.params.get("units", []))
+        # find an ACTIVE redundancy group matching the permission's scope.
+        for r in _active_redundancy_groups(ir):
+            if str(r.params.get("group_id")) != str(gid):
+                continue
+            group_units = set(str(u) for u in r.params.get("units", []))
+            # the permission's scope is realizable iff it names a real group member
+            # (removing it over the window could push availability below the floor).
+            if perm_units & group_units:
+                return True
         return False
 
-    def conflict_unsat_core(self, o: str, p: str) -> list[str] | None:
+    def conflict_unsat_core(self, obligation_id: str, permission_id: str) -> list[str] | None:
+        """The rule-vs-rule Z3 UNSAT core (mirror ``ManufacturingVerifier``): the
+        obligation says the redundancy floor is HELD over the scope; the permission
+        says it MAY be breached (NOT held) — jointly UNSAT. Returns the named core."""
+        s = z3.Solver()
+        s.set(unsat_core=True)
+        held = z3.Bool("redundancy_floor_held_over_scope_S")
+        s.assert_and_track(held, obligation_id)            # obligation: floor held
+        s.assert_and_track(z3.Not(held), permission_id)    # permission: may breach
+        if s.check() == z3.unsat:
+            return [str(c) for c in s.unsat_core()]
         return None
