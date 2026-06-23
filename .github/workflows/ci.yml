@@ -13,8 +13,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
-        run: python -m pip install -e ".[dev]"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install (python — dev + web + extract surfaces)
+        run: python -m pip install -e ".[dev,web,extract]"
       - name: Tests
         run: python -m pytest -q
       - name: Types
@@ -23,3 +26,27 @@ jobs:
         run: |
           python -m feasible.cli certify feasible/scenario/data --out plan_cert.json --rulepack-out rule_pack_cert.json
           python -m feasible.cli verify plan_cert.json --rulepack rule_pack_cert.json --signer-key signer_pub.hex
+      - name: Extract smoke — offline Gemini-replay extraction (no network)
+        run: python -m feasible.cli extract feasible/scenario/data/shop_rules.md
+      - name: Datacenter smoke — second-domain certify + authenticated verify via the api facade
+        run: |
+          python -c "from feasible import api; from feasible.canon.canonical import new_signing_key; k=new_signing_key(); r=api.certify('datacenter', signer_key=k); assert api.verify(r.plan_cert, r.rule_pack_cert, signer_key=k).ok"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Install (web console)
+        run: npm ci
+      - name: Vitest
+        run: npm test
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
