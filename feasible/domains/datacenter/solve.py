@@ -24,7 +24,7 @@ from __future__ import annotations
 from ortools.sat.python import cp_model
 
 from feasible.domains import get_domain
-from feasible.domains.datacenter.verifier import DcVarIndex
+from feasible.domains.datacenter.verifier import DcVarIndex, _dc_build_model
 from feasible.ir.domain import FCIR, Plan
 from feasible.solve.orchestrate import SolveResult
 
@@ -59,6 +59,51 @@ def dc_extract_plan(solver: cp_model.CpSolver, vi: DcVarIndex) -> Plan:
         start = int(solver.value(vi.task_start[op.op_id]))
         assignments[op.op_id] = (start, vi.task_path[op.op_id])
     return Plan(assignments=assignments, cleanouts=[])
+
+
+def dc_degenerate_solve(
+    ir: FCIR, max_seconds: float = 30.0, *, workers: int = 1, seed: int = 1
+) -> Plan:
+    """The DOCUMENTED degenerate-objective solve that produces the HERO gotcha
+    incumbent (B-2: ``dc_incumbent_a``) — an EMERGENT N+1 breach, NOT a hand-planted
+    floor cleanout.
+
+    It routes through the SAME ``DatacenterVerifier.compile`` (the single CP-SAT
+    source) but with ``relax_redundancy=True`` (the per-timestep ``avail >= floor``
+    HARD constraint is DROPPED), then replaces the staged ``(stranded, makespan)``
+    objective with a DEGENERATE one: **MAXIMIZE the sum of maintenance-task starts** —
+    i.e. "defer all preventive maintenance to the end of the horizon to consolidate
+    downtime into the already-planned outage window." This is a realistic-sounding but
+    degenerate operator heuristic. With the floor relaxed, the F1 cooling-path task is
+    pushed to the latest legal start, landing it ON TOP of the fixed F3 outage window —
+    so a floored group drops below N+1 at a specific timestep as an EMERGENT consequence
+    of that objective (the planner walks straight into the floor breach the certificate
+    catches). The maintenance-window constraint is STILL enforced (the degenerate plan
+    is otherwise well-formed), only the redundancy floor is relaxed.
+
+    Single-worker + seeded + sorted extraction → byte-deterministic (B-11), so
+    ``dc_incumbent_a`` is a stable fixed plan reproducible by the gotcha test calling
+    THIS helper (it is NOT a literal hand-built Plan).
+
+    Builds via the module-level ``_dc_build_model`` (the SAME builder
+    ``DatacenterVerifier.compile`` delegates to) directly — the degenerate
+    ``relax_redundancy=True`` build is an INTERNAL datacenter helper off the certify
+    path (the frozen ``DomainVerifier.compile`` Protocol seam takes no such flag), not a
+    widening of the cross-domain seam."""
+    m, vi = _dc_build_model(ir, relax_redundancy=True)
+    # replace the staged objective with the degenerate "defer maintenance to end of
+    # horizon" objective: maximize sum of task starts. The floor being relaxed lets the
+    # F1 task slide onto the F3 outage window -> the emergent buffer-spend.
+    if vi.task_start:
+        m.maximize(sum(vi.task_start.values()))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = max_seconds
+    solver.parameters.num_search_workers = workers
+    solver.parameters.random_seed = seed
+    status = solver.solve(m)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise RuntimeError(f"degenerate solve produced no plan: status={solver.status_name(status)}")
+    return dc_extract_plan(solver, vi)
 
 
 def dc_solve(

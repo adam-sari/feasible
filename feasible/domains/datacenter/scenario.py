@@ -290,12 +290,22 @@ def dc_incumbent_b(ir: FCIR | None = None) -> Plan:
 
 
 def dc_incumbent_a(ir: FCIR | None = None) -> Plan:
-    """The HERO baseline (B-2): a degenerate-makespan-minimizing plan that SPENDS the
-    N+1 buffer. It schedules T1 (which derates redundancy unit F1) at [6,8) — exactly
-    overlapping F3's FIXED outage [6,8) — so at t=6,7 only F2 is available (1 < floor
-    2): an EMERGENT redundancy-floor breach, not a hand-planted cleanout. T2 at [0,1).
+    """The HERO baseline (B-2): the OUTPUT of a DOCUMENTED degenerate-objective solve
+    (``dc_degenerate_solve``) — NOT a literal hand-built Plan with a planted cleanout.
 
-    The breach is the maintenance-spends-the-buffer gotcha: a planner minimizing
-    makespan (run the F1 task as late/short as possible) walks straight into the floor
-    violation the certificate catches."""
-    return Plan(assignments={"task:T1": (6, "F1"), "task:T2": (0, "F4")}, cleanouts=[])
+    ``dc_degenerate_solve`` runs the datacenter CP-SAT model with the redundancy floor
+    RELAXED (``relax_redundancy=True``) and a degenerate "defer all maintenance to the
+    end of the horizon" objective (maximize the maintenance-task starts — consolidate
+    downtime into the already-planned outage window). With the floor relaxed, the F1
+    cooling-path task slides to its latest legal start [6,8), landing ON TOP of F3's
+    FIXED outage [6,8) — so at t=6,7 only F2 is available (1 < floor 2): an EMERGENT
+    redundancy-floor breach. The maintenance-spends-the-buffer gotcha is an EMERGENT
+    consequence of that objective, not a hand-planted floor cleanout. Byte-deterministic
+    (single-worker, seeded) so the incumbent is a stable fixed plan.
+
+    Runs against the GOVERNED active set (default: ``build_dc_scenario_active_ir``) —
+    the same constraint surface the plan certifies — so the incumbent is comparable."""
+    from feasible.domains.datacenter.solve import dc_degenerate_solve
+
+    active_ir = ir if ir is not None else build_dc_scenario_active_ir()
+    return dc_degenerate_solve(active_ir, workers=1, seed=1)

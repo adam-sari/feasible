@@ -694,8 +694,18 @@ def _maintenance_task_links(ir: FCIR) -> dict[str, tuple[str, int, str | None]]:
     return out
 
 
-def _dc_build_model(ir: FCIR) -> tuple[cp_model.CpModel, DcVarIndex]:
+def _dc_build_model(
+    ir: FCIR, *, relax_redundancy: bool = False
+) -> tuple[cp_model.CpModel, DcVarIndex]:
     """Build the datacenter CP-SAT model. CODE-DISJOINT from the checker.
+
+    ``relax_redundancy`` (default ``False``): when ``True`` the per-timestep
+    ``available_t >= floor`` HARD constraint is OMITTED (the availability var is still
+    built so the ``stranded`` objective var remains well-defined), so a degenerate
+    objective can land on a floor-breaching plan. This is the DOCUMENTED degenerate
+    build the hero gotcha incumbent (``dc_degenerate_solve``, B-2) runs against —
+    NEVER the certified plan's build (which keeps the floor HARD). The certify path
+    always calls this with the default (floor enforced).
 
     Decision vars: each maintenance-task start over ``[0, horizon - duration]``.
     Constraints:
@@ -704,6 +714,7 @@ def _dc_build_model(ir: FCIR) -> tuple[cp_model.CpModel, DcVarIndex]:
       * dc:redundancy_floor (active) — per group, per timestep, ``available_t >=
         floor`` where ``available_t`` = installed units minus (fixed-maintenance-down
         + task-derated-down). A task derates its linked unit while running.
+        OMITTED when ``relax_redundancy`` (the degenerate-gotcha build only).
       * dc:power_cap / dc:anti_affinity (active structural) — FIXED feasibility checks:
         the v1 draws/placements are instance facts, so a breach makes the model
         infeasible (the checker also flags it; the compile must not optimize against a
@@ -794,7 +805,8 @@ def _dc_build_model(ir: FCIR) -> tuple[cp_model.CpModel, DcVarIndex]:
                         up_terms.append(1)
                 avail = m.new_int_var(0, len(units), f"dc_avail_{gid}_{t}")
                 m.add(avail == sum(up_terms))
-                m.add(avail >= floor)
+                if not relax_redundancy:
+                    m.add(avail >= floor)  # the floor is HARD on the certify path
                 vi.avail[(gid, t)] = avail
 
     # --- dc:power_cap (active structural): FIXED feasibility check (v1 draws fixed).
@@ -953,7 +965,13 @@ class DatacenterVerifier:
         the checker (this module never imports the checker's coverage_floor kernel; the
         checker never imports these CP-SAT vars). ``model`` is accepted for Protocol
         parity (the manufacturing seam takes a model); the datacenter path builds its
-        own ``CpModel`` and returns it."""
+        own ``CpModel`` and returns it.
+
+        The certify path always builds with the redundancy floor HARD (the default).
+        The DOCUMENTED degenerate-gotcha build (``relax_redundancy=True``, B-2) is an
+        INTERNAL datacenter helper (``solve.dc_degenerate_solve``) that calls the
+        module-level ``_dc_build_model`` directly — NOT through this cross-domain seam,
+        which keeps the frozen ``DomainVerifier.compile`` signature unwidened."""
         return _dc_build_model(ir)
 
     def kpis(self) -> list[Any]:
