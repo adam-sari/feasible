@@ -13,3 +13,11 @@ plan_cert.html
 /demo_*
 /final_*
 .env
+
+# The CLI's offline replay store (feasible/extract/fixtures/*.json) is COMMITTED and
+# LOAD-BEARING (read by `feasible extract` on a fresh clone) — do NOT ignore it.
+# These test fixtures, by contrast, are SELF-SEEDED at runtime: every consuming test
+# (tests/extract/test_orchestrate.py) writes the full run via `_write_full_run` before
+# reading it. The committed copies were dead weight and drifted vs the CLI store, so
+# they are untracked here (the .gitkeep keeps the dir).
+/tests/extract/fixtures/*.json
