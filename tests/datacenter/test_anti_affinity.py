@@ -156,3 +156,38 @@ def test_anti_affinity_missing_fd_mapping_fails_closed_as_collision_with_unknown
     vs = [v for v in res.violations if v.rule_id == "dc:anti_affinity"]
     assert vs                                  # fail-closed, never a silent pass
     assert res.passed is False
+
+
+def test_anti_affinity_partial_unmapped_fails_closed_in_checker():
+    # B-5 partial case: ONE replica mapped (A->fd1), the OTHER unmapped (B). The
+    # unmapped placement could be anywhere — including fd1 — so the pair CANNOT be
+    # proven distinct. The checker MUST flag it (fail closed), never a vacuous pass.
+    ir = _ir_with_anti_affinity(replicas=["A", "B"], fault_domain_of={"A": "fd1"})
+    res = check(_plan(ir), ir)
+    vs = [v for v in res.violations if v.rule_id == "dc:anti_affinity"]
+    assert vs                                  # fail-closed
+    assert res.passed is False
+    assert {tuple(sorted(v.counter_witness["replicas"])) for v in vs} == {("A", "B")}
+
+
+def test_anti_affinity_z3_agrees_with_checker_on_partial_unmapped():
+    # The Z3 mirror MUST fail closed on the SAME partial-unmapped pair the checker
+    # flags: a mapped-vs-unmapped pair is NOT provably distinct, so the attestation
+    # must be UNSAT (infeasible), matching the checker's violation. (Regression for
+    # the shared -1 sentinel divergence where 0 != -1 read as SAT / no collision.)
+    ir = _ir_with_anti_affinity(replicas=["A", "B"], fault_domain_of={"A": "fd1"})
+    vs = [v for v in check(_plan(ir), ir).violations if v.rule_id == "dc:anti_affinity"]
+    assert vs                                  # checker flags it ...
+    assert attest_feasibility(_plan(ir), ir).feasible is False  # ... and Z3 agrees
+
+
+def test_anti_affinity_three_replicas_partial_unmapped_isolates_unknown_pairs():
+    # A->fd1, B->fd2 (distinct, known), C unmapped. Only pairs TOUCHING the unknown
+    # replica C fail closed; the fully-known distinct pair (A,B) does NOT collide.
+    ir = _ir_with_anti_affinity(
+        replicas=["A", "B", "C"], fault_domain_of={"A": "fd1", "B": "fd2"},
+    )
+    vs = [v for v in check(_plan(ir), ir).violations if v.rule_id == "dc:anti_affinity"]
+    pairs = {tuple(sorted(v.counter_witness["replicas"])) for v in vs}
+    assert pairs == {("A", "C"), ("B", "C")}   # exactly the unknown-touching pairs
+    assert attest_feasibility(_plan(ir), ir).feasible is False  # Z3 agrees (UNSAT)

@@ -334,11 +334,21 @@ def _anti_affinity_violations(plan: Plan, ir: FCIR) -> list[Violation]:
 
 def _anti_affinity_z3(s: "z3.Solver", ir: FCIR) -> None:
     """Mirror each replica PAIR's distinctness as a TRACKED Z3 assertion
-    ``dc:anti_affinity:<group>:<r1>|<r2>`` (``fd[r1] != fd[r2]`` over integer
-    fault-domain ids). Same TOTAL fail-closed param reads as the checker: a missing
-    mapping pins a DISTINCT-but-equal-to-everyone integer so the pair is UNSAT
-    (unknown placement fails closed); a missing required param yields an
-    unsatisfiable tracked clause."""
+    ``dc:anti_affinity:<group>:<r1>|<r2>``, fail-closed EXACTLY as the checker
+    ``_anti_affinity_violations``:
+
+    * BOTH replicas mapped (known fd) -> assert ``fd[r1] != fd[r2]`` over integer
+      fault-domain ids (UNSAT iff they share a known fd — a real collision).
+    * EITHER replica unmapped -> the placement is unknown and CANNOT be proven
+      distinct, so the pair fails closed: assert a tracked ``False`` (forced
+      UNSAT). This matches the checker, which emits a violation for any pair
+      touching an unmapped replica (``elif not known1 or not known2``). NOTE: a
+      shared sentinel int would be WRONG here — a mapped(=0)-vs-unmapped pair
+      would read ``0 != sentinel`` -> SAT (no collision), silently diverging from
+      the checker. Each unmapped replica therefore gets a UNIQUE fresh int (so the
+      model is self-consistent), and the per-pair tracked ``False`` — not integer
+      inequality — is what enforces the fail-closed UNSAT.
+    * a missing required param yields an unsatisfiable tracked clause."""
     for r in ir.rules:
         if r.rule_id != "dc:anti_affinity":
             continue
@@ -353,27 +363,36 @@ def _anti_affinity_z3(s: "z3.Solver", ir: FCIR) -> None:
         replicas = [str(u) for u in replicas_raw]
         fault_domain_of = p.get("fault_domain_of", {})
         # map each DISTINCT KNOWN fault-domain string to a stable integer id
-        # (deterministic by first-appearance over the sorted fd strings). An
-        # unmapped replica is pinned to a SHARED sentinel integer so it collides
-        # with every other unmapped replica AND can equal a known fd only if that
-        # known fd happens to be the sentinel string (it never is) — fail-closed.
+        # (deterministic by first-appearance over the sorted fd strings). Each
+        # UNMAPPED replica gets its OWN fresh int beyond the known-fd range so the
+        # model is consistent; the pair's fail-closed UNSAT comes from the tracked
+        # False asserted below (not from a shared/sentinel integer value).
         known_fds = sorted({str(v) for v in fault_domain_of.values()})
         fd_id = {fd: idx for idx, fd in enumerate(known_fds)}
-        _UNKNOWN_INT = -1  # the shared sentinel: every unmapped replica collides
-        fd_var = {}
+        next_unknown = len(known_fds)
+        fd_var: dict[str, "z3.ArithRef"] = {}
+        known: dict[str, bool] = {}
         for rep in replicas:
             v = fault_domain_of.get(rep, _MISSING)
-            pinned = _UNKNOWN_INT if v is _MISSING else fd_id[str(v)]
+            if v is _MISSING:
+                pinned = next_unknown
+                next_unknown += 1
+                known[rep] = False
+            else:
+                pinned = fd_id[str(v)]
+                known[rep] = True
             var = z3.Int(f"fd_{gid}_{rep}")
             s.add(var == pinned)
             fd_var[rep] = var
         for i in range(len(replicas)):
             for j in range(i + 1, len(replicas)):
                 r1, r2 = replicas[i], replicas[j]
-                s.assert_and_track(
-                    fd_var[r1] != fd_var[r2],
-                    f"dc:anti_affinity:{gid}:{r1}|{r2}",
-                )
+                tag = f"dc:anti_affinity:{gid}:{r1}|{r2}"
+                if not known[r1] or not known[r2]:
+                    # unknown placement -> not provably distinct -> fail closed.
+                    s.assert_and_track(z3.BoolVal(False), tag)
+                else:
+                    s.assert_and_track(fd_var[r1] != fd_var[r2], tag)
 
 
 def _plan_outage_intervals(plan: Plan) -> dict[str, list[tuple[int, int]]]:
