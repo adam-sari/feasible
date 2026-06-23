@@ -244,6 +244,138 @@ def _maintenance_window_z3(s: "z3.Solver", plan: Plan, ir: FCIR) -> None:
                 )
 
 
+# --------------------------------------------------------------------------- #
+# dc:anti_affinity (Task 5) — STRUCTURAL instance-invariant (B-4)              #
+# --------------------------------------------------------------------------- #
+# In v1 the ``fault_domain_of`` replica->fault-domain assignment is a FIXED
+# instance fact (replica PLACEMENT is not a plan decision), so anti-affinity is
+# an instance-level structural invariant — NOT a plan-dependent predicate. Its
+# kind lives in ``structural_rule_kinds`` (the registry does not REQUIRE a
+# predicate for it), but a closed/total checker predicate STILL runs (a
+# structural-kind rule MAY carry one) and is Z3-mirrored. Two replicas in the
+# SAME power/cooling fault domain breach the group (a single fault knocks out
+# both). INTEGERS ONLY in the Z3 mirror (fault domains mapped to integer ids).
+
+
+class AntiAffinityWitness(BaseModel):
+    group_id: str
+    replicas: list[str]              # the colliding pair (sorted)
+    shared_fault_domain: str         # the fd both replicas share (or an UNKNOWN sentinel)
+
+
+register_witness_schema("anti_affinity", AntiAffinityWitness)
+
+# the sentinel fd an UNMAPPED replica collapses to: a DISTINCT placeholder per
+# replica that is treated as colliding with EVERY other replica (an unknown
+# placement could be anywhere — fail closed as a collision-with-unknown, never a
+# vacuous pass). The string carries the replica id so the witness is informative.
+_UNKNOWN_FD_PREFIX = "__unknown_fd__:"
+
+
+def _fd_of(fault_domain_of: dict, replica: str) -> tuple[str, bool]:
+    """TOTAL read (B-5): the fault domain of ``replica``, and whether it is KNOWN.
+    A missing mapping yields a distinct per-replica sentinel flagged unknown (so it
+    cannot vacuously prove distinctness) — never a ``KeyError``."""
+    v = fault_domain_of.get(replica, _MISSING)
+    if v is _MISSING:
+        return f"{_UNKNOWN_FD_PREFIX}{replica}", False
+    return str(v), True
+
+
+def _anti_affinity_violations(plan: Plan, ir: FCIR) -> list[Violation]:
+    """Closed/total instance-invariant over the certified instance (B-4: the
+    replica->fd placement is a FIXED instance fact in v1, so ``plan`` is unused).
+
+    TOTAL param reads (B-5): a missing ``group_id``/``replicas`` -> ONE
+    deterministic violation (passed=False), never a KeyError, never a silent pass.
+    For every replica PAIR, if they share a fault domain (or EITHER is unmapped —
+    an unknown placement fails CLOSED as a potential collision), emit a per-pair
+    witness ``{group_id, replicas, shared_fault_domain}``. Deterministic order
+    (sorted replica order, lexicographic pairs)."""
+    out: list[Violation] = []
+    for r in ir.rules:
+        if r.rule_id != "dc:anti_affinity":
+            continue
+        if not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        missing = next((k for k in ("group_id", "replicas")
+                        if p.get(k, _MISSING) is _MISSING), None)
+        if missing is not None:
+            out.append(_missing_param_violation("dc:anti_affinity", missing))
+            continue
+        gid = str(p["group_id"])
+        replicas = [str(u) for u in p["replicas"]]
+        fault_domain_of = p.get("fault_domain_of", {})  # optional -> total (unmapped fails closed)
+        # deterministic lexicographic pairs over the replica list
+        for i in range(len(replicas)):
+            for j in range(i + 1, len(replicas)):
+                r1, r2 = replicas[i], replicas[j]
+                fd1, known1 = _fd_of(fault_domain_of, r1)
+                fd2, known2 = _fd_of(fault_domain_of, r2)
+                if fd1 == fd2:
+                    shared = fd1
+                elif not known1 or not known2:
+                    # an unknown placement cannot be PROVEN distinct -> fail closed.
+                    shared = fd1 if not known1 else fd2
+                else:
+                    continue  # both known and distinct -> no collision
+                pair = sorted((r1, r2))
+                out.append(Violation(
+                    rule_id="dc:anti_affinity", span=None,
+                    message=f"{gid}: replicas {pair[0]} and {pair[1]} share fault domain {shared}",
+                    counter_witness={
+                        "group_id": gid, "replicas": pair, "shared_fault_domain": shared,
+                    },
+                    witness_kind="anti_affinity", witness_version="v1",
+                ))
+    return out
+
+
+def _anti_affinity_z3(s: "z3.Solver", ir: FCIR) -> None:
+    """Mirror each replica PAIR's distinctness as a TRACKED Z3 assertion
+    ``dc:anti_affinity:<group>:<r1>|<r2>`` (``fd[r1] != fd[r2]`` over integer
+    fault-domain ids). Same TOTAL fail-closed param reads as the checker: a missing
+    mapping pins a DISTINCT-but-equal-to-everyone integer so the pair is UNSAT
+    (unknown placement fails closed); a missing required param yields an
+    unsatisfiable tracked clause."""
+    for r in ir.rules:
+        if r.rule_id != "dc:anti_affinity":
+            continue
+        if not ir.has_active(r.rule_id):
+            continue
+        p = r.params
+        gid = str(p.get("group_id", "?"))
+        replicas_raw = p.get("replicas", _MISSING)
+        if gid == "?" or replicas_raw is _MISSING:
+            s.assert_and_track(z3.BoolVal(False), f"dc:anti_affinity:{gid}:MISSING_PARAM")
+            continue
+        replicas = [str(u) for u in replicas_raw]
+        fault_domain_of = p.get("fault_domain_of", {})
+        # map each DISTINCT KNOWN fault-domain string to a stable integer id
+        # (deterministic by first-appearance over the sorted fd strings). An
+        # unmapped replica is pinned to a SHARED sentinel integer so it collides
+        # with every other unmapped replica AND can equal a known fd only if that
+        # known fd happens to be the sentinel string (it never is) — fail-closed.
+        known_fds = sorted({str(v) for v in fault_domain_of.values()})
+        fd_id = {fd: idx for idx, fd in enumerate(known_fds)}
+        _UNKNOWN_INT = -1  # the shared sentinel: every unmapped replica collides
+        fd_var = {}
+        for rep in replicas:
+            v = fault_domain_of.get(rep, _MISSING)
+            pinned = _UNKNOWN_INT if v is _MISSING else fd_id[str(v)]
+            var = z3.Int(f"fd_{gid}_{rep}")
+            s.add(var == pinned)
+            fd_var[rep] = var
+        for i in range(len(replicas)):
+            for j in range(i + 1, len(replicas)):
+                r1, r2 = replicas[i], replicas[j]
+                s.assert_and_track(
+                    fd_var[r1] != fd_var[r2],
+                    f"dc:anti_affinity:{gid}:{r1}|{r2}",
+                )
+
+
 def _plan_outage_intervals(plan: Plan) -> dict[str, list[tuple[int, int]]]:
     """PLAN-scheduled outages (the schedulable decision carried IN the plan, never
     instance state): a cleanout whose reason is ``plan_outage:<unit>`` removes that
@@ -415,7 +547,7 @@ class DatacenterVerifier:
     domain_id: str = "datacenter"
     # rule_kinds: the PLAN-DEPENDENT evaluated kinds + the STRUCTURAL kinds (B-4).
     rule_kinds: frozenset[str] = frozenset({
-        "redundancy_floor", "maintenance_window", "power_cap",
+        "redundancy_floor", "maintenance_window", "power_cap", "anti_affinity",
     })
     # evaluated (PLAN-DEPENDENT, registry-REQUIRED predicate) ids.
     evaluated_rule_ids: frozenset[str] = frozenset({
@@ -423,10 +555,11 @@ class DatacenterVerifier:
     })
     # STRUCTURAL kinds (instance-level invariants — B-4): the registry does NOT
     # require a predicate, but a closed/total checker + Z3 mirror STILL run.
-    structural_rule_kinds: frozenset[str] = frozenset({"power_cap"})
+    structural_rule_kinds: frozenset[str] = frozenset({"power_cap", "anti_affinity"})
     # the COMPLETE set of rule_ids this domain owns (cross-domain isolation): the
     # evaluated ids + the structural ids.
-    known_rule_ids: frozenset[str] = evaluated_rule_ids | frozenset({"dc:power_cap"})
+    known_rule_ids: frozenset[str] = evaluated_rule_ids | frozenset(
+        {"dc:power_cap", "dc:anti_affinity"})
 
     def check_predicates(self, plan: Plan, ir: FCIR) -> list[Violation]:
         out: list[Violation] = []
@@ -438,6 +571,8 @@ class DatacenterVerifier:
             out += _maintenance_window_violations(plan, ir)  # PLAN-DEPENDENT; TOTAL reads (B-5)
         if ir.has_active("dc:power_cap"):
             out += _power_cap_violations(plan, ir)  # STRUCTURAL invariant; TOTAL reads (B-5)
+        if ir.has_active("dc:anti_affinity"):
+            out += _anti_affinity_violations(plan, ir)  # STRUCTURAL invariant; TOTAL reads (B-5)
         return out
 
     def z3_encode(self, plan: Plan, ir: FCIR) -> "z3.Solver":
@@ -459,6 +594,8 @@ class DatacenterVerifier:
             _maintenance_window_z3(s, plan, ir)
         if ir.has_active("dc:power_cap"):
             _power_cap_z3(s, ir)
+        if ir.has_active("dc:anti_affinity"):
+            _anti_affinity_z3(s, ir)
         return s
 
     def gotcha_rule_id(self) -> str | None:
