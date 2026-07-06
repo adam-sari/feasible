@@ -194,9 +194,3 @@ re-checks but reports the signer as **self-described / unverified**.)
   complementary to (not a replacement for) Uptime commissioning / a PE seal, and does
   not model airflow/CFD or electrical-study depth — it proves the *discrete logical &
   resource* plan never drops below contracted redundancy at any step.
-
-## Provenance
-
-Design, plans, market validation, and the multi-agent adversarial reviews that shaped
-v0.2 are under `docs/superpowers/`; the frozen facade contract is in
-`docs/superpowers/specs/feasible-api-schema.md`.
