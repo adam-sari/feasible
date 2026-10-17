@@ -4,9 +4,15 @@ Every route calls EXACTLY ONE facade function and serializes its frozen view-mod
 dataclass to JSON verbatim. The backend owns no business logic, no recompute, no
 re-summary: it is a pure transport so the SPA renders engine truth unmodified. It
 NEVER constructs/mutates/re-signs a cert — certs are opaque JSON forwarded as-is.
+
+Routes are plain ``def`` handlers, so FastAPI runs them on a threadpool. The engine
+uses Z3's process-global context, which is not thread-safe: two overlapping requests
+(e.g. the SPA's StrictMode double-fetch) can corrupt it and crash the process. Every
+facade call therefore runs under ``_ENGINE_LOCK``.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -16,6 +22,9 @@ from pydantic import BaseModel
 from feasible import api
 
 app = FastAPI(title="Feasible Console", version="0.2-demo")
+
+# Serializes engine (Z3 / CP-SAT) work across the request threadpool; see module doc.
+_ENGINE_LOCK = threading.Lock()
 
 
 def _view_to_dict(view: Any) -> Any:
@@ -37,40 +46,47 @@ class VerifyBody(BaseModel):
 
 @app.get("/api/scenarios")
 def scenarios() -> Any:
-    return _view_to_dict(api.list_scenarios())
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.list_scenarios())
 
 
 @app.get("/api/inputs/{domain_id}")
 def inputs(domain_id: str) -> Any:
-    return _view_to_dict(api.load_inputs(domain_id))
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.load_inputs(domain_id))
 
 
 @app.get("/api/constraints/{domain_id}")
 def constraints(domain_id: str) -> Any:
-    return _view_to_dict(api.get_constraints(domain_id))
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.get_constraints(domain_id))
 
 
 @app.post("/api/certify/{domain_id}")
 def certify(domain_id: str) -> Any:
     # self-described (ephemeral key) — the console never holds a signing key
-    return _view_to_dict(api.certify(domain_id))
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.certify(domain_id))
 
 
 @app.get("/api/timeline/{domain_id}")
 def timeline(domain_id: str) -> Any:
-    return _view_to_dict(api.get_timeline(domain_id))
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.get_timeline(domain_id))
 
 
 @app.get("/api/certificates/{domain_id}")
 def certificates(domain_id: str) -> Any:
-    return _view_to_dict(api.get_certificates(domain_id))
+    with _ENGINE_LOCK:
+        return _view_to_dict(api.get_certificates(domain_id))
 
 
 @app.post("/api/verify")
 def verify(body: VerifyBody) -> Any:
-    return _view_to_dict(
-        api.verify(body.plan_cert, body.rule_pack_cert, signer_key=body.signer_key)
-    )
+    with _ENGINE_LOCK:
+        return _view_to_dict(
+            api.verify(body.plan_cert, body.rule_pack_cert, signer_key=body.signer_key)
+        )
 
 
 @app.get("/api/_routes")
