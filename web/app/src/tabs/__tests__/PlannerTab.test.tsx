@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { TimelineView, CertifyResult } from "../../api/types";
+import { certify } from "../../api/client";
 
 const timeline: TimelineView = {
   domain_id: "manufacturing",
@@ -44,6 +45,28 @@ describe("PlannerTab", () => {
     );
     expect(
       screen.getByText(/Cleanouts may only be performed during the day shift/)
+    ).toBeInTheDocument();
+  });
+
+  it("renders a span-less gotcha (datacenter) via its counter-witness", async () => {
+    vi.mocked(certify).mockResolvedValueOnce({
+      ...cert,
+      domain_id: "datacenter",
+      plan_cert: {
+        kpi_vs_incumbent_B: {},
+        incumbent_A_failure: {
+          violated_rule_ref: "dc:redundancy_floor",
+          span: null,
+          counter_witness: { group_id: "G1", timestep: 6, available: 1, floor: 2 },
+        },
+      },
+    });
+    render(<PlannerTab />);
+    await waitFor(() =>
+      expect(screen.getByText("dc:redundancy_floor")).toBeInTheDocument()
+    );
+    expect(
+      screen.getByText("group_id=G1 · timestep=6 · available=1 · floor=2")
     ).toBeInTheDocument();
   });
 });

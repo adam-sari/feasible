@@ -16,8 +16,14 @@ export function PlannerTab() {
 
   const pc = cert?.plan_cert as Record<string, any> | undefined;
   const kpis = (pc?.kpi_vs_incumbent_B ?? {}) as Record<string, { optimized: number; incumbent_b: number }>;
+  // Manufacturing cites an SOP span; datacenter has no source quote (span: null) and
+  // carries a counter-witness instead (e.g. group/timestep/available/floor).
   const gotcha = pc?.incumbent_A_failure as
-    | { violated_rule_ref: string; span: { quoted_text: string } }
+    | {
+        violated_rule_ref: string;
+        span: { quoted_text: string } | null;
+        counter_witness?: Record<string, string | number> | null;
+      }
     | undefined;
 
   return (
@@ -38,8 +44,19 @@ export function PlannerTab() {
       <h3>Gotcha — incumbent A failure (verbatim)</h3>
       {gotcha ? (
         <p>
-          violates <strong>{gotcha.violated_rule_ref}</strong>:{" "}
-          <q>{gotcha.span.quoted_text}</q>
+          violates <strong>{gotcha.violated_rule_ref}</strong>
+          {gotcha.span ? (
+            <>: <q>{gotcha.span.quoted_text}</q></>
+          ) : gotcha.counter_witness ? (
+            <>
+              {" "}— counter-witness:{" "}
+              <code>
+                {Object.entries(gotcha.counter_witness)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(" · ")}
+              </code>
+            </>
+          ) : null}
         </p>
       ) : (
         <p className="nodata">no gotcha</p>
