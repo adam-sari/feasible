@@ -1,9 +1,49 @@
-:root { font-family: system-ui, sans-serif; }
-body { margin: 0; }
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #2d3138;
+  line-height: 1.45;
+}
+body { margin: 0; background: #ffffff; }
+
+.shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 220px; flex: none; padding: 20px 16px;
+  background: #f6f7f9; border-right: 1px solid #e3e5e8;
+}
+.sidebar h1 { font-size: 20px; margin: 0 0 20px; letter-spacing: -0.01em; }
+.sidebar h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #6b7280; margin: 0 0 8px;
+}
+.sidebar ul { list-style: none; padding: 0; margin: 0; }
+.sidebar li { margin-bottom: 6px; }
+.scenario {
+  width: 100%; text-align: left; font: inherit; font-size: 13px;
+  padding: 8px 10px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.scenario:hover { background: #eceef1; }
+.scenario.active { background: #ffffff; border-color: #d6d9de; font-weight: 600; }
+.sidebar-note { font-size: 11px; color: #6b7280; margin-top: 16px; }
+
+.content { flex: 1; min-width: 0; padding: 20px 28px; }
+.content h2 { font-size: 20px; margin: 16px 0 12px; }
+.content h3 { font-size: 14px; margin: 24px 0 8px; }
+.content table { border-collapse: collapse; font-size: 13px; }
+.content th, .content td { padding: 6px 14px 6px 0; border-bottom: 1px solid #e6e8eb; text-align: left; }
+.content th { color: #6b7280; font-weight: 600; }
+.content code { font-size: 12px; background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+.chart { display: block; max-width: 100%; height: auto; }
+
 .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .pill-pass { background: #d5f5e3; color: #1e8449; }
 .pill-fail { background: #fadbd8; color: #c0392b; }
 .pill-synthetic { background: #fef9e7; color: #b7950b; border: 1px dashed #b7950b; }
-.tab-nav a { margin-right: 12px; }
-.tab-nav a.active { font-weight: 700; }
+.tab-nav { display: flex; gap: 4px; border-bottom: 1px solid #e3e5e8; }
+.tab-nav a {
+  padding: 8px 12px; font-size: 14px; color: #4b5563; text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab-nav a:hover { color: #111827; }
+.tab-nav a.active { font-weight: 600; color: #111827; border-bottom-color: #2c7fb8; }
 .nodata { color: #888; font-style: italic; }

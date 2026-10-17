@@ -26,24 +26,25 @@ export function App() {
   }, []);
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside style={{ width: 200, borderRight: "1px solid #ddd", padding: 12 }}>
-        <h1 style={{ fontSize: 18 }}>Feasible</h1>
-        <h3 style={{ fontSize: 13 }}>Scenarios</h3>
-        <ul style={{ listStyle: "none", padding: 0 }}>
+    <div className="shell">
+      <aside className="sidebar">
+        <h1>Feasible</h1>
+        <h3>Scenarios</h3>
+        <ul>
           {scenarios.map((s) => (
             <li key={s.domain_id}>
               <button
                 onClick={() => setDomain(s.domain_id)}
-                style={{ fontWeight: s.domain_id === domainId ? 700 : 400 }}
+                className={s.domain_id === domainId ? "scenario active" : "scenario"}
               >
-                {s.display_name} ({s.data})
+                {s.display_name}
               </button>
             </li>
           ))}
         </ul>
+        <p className="sidebar-note">Both scenarios use illustrative data; verification is real.</p>
       </aside>
-      <main style={{ flex: 1, padding: 16 }}>
+      <main className="content">
         <nav className="tab-nav">
           {TABS.map((t) => (
             <NavLink key={t.to} to={t.to}
