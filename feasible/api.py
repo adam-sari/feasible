@@ -51,7 +51,7 @@ from feasible.domains.base import (
 from feasible.ir.domain import FCIR, Plan
 from feasible.smt.attest import attest_feasibility
 
-# The registered scenarios surfaced by the facade. Manufacturing first (real data);
+# The registered scenarios surfaced by the facade. Manufacturing first (synthetic SOP + orders);
 # the datacenter track (Task 9) appends its id (synthetic facility — the certs are
 # REAL, the DATA is synthetic, surfaced honestly via the domain's data flag).
 _SCENARIOS: list[str] = ["manufacturing", "datacenter"]
@@ -99,8 +99,8 @@ def list_scenarios() -> list[ScenarioInfo]:
     """The registered domains as ``ScenarioInfo`` view-models.
 
     The ``data`` flag is HONEST per-domain: it comes from the domain's
-    ``trust_boundary_extra()["data"]`` capability descriptor (manufacturing: real;
-    datacenter: synthetic — the certs are real, the facility data is synthetic) —
+    ``trust_boundary_extra()["data"]`` capability descriptor (both shipped
+    domains: synthetic — the certs are real, the scenario data is synthetic) —
     never a blind ``"real"``."""
     out: list[ScenarioInfo] = []
     for domain_id in _SCENARIOS:
@@ -275,8 +275,8 @@ def _trust_vector(
 
     ``checker`` is ``pass`` only if both certs verify AND bind; ``data`` /
     ``coverage`` / ``conflict_replay`` come from the domain's capability descriptor
-    (manufacturing: real data, calibrated coverage, verified conflict replay — its
-    ``trust_boundary_extra`` is empty)."""
+    (manufacturing: synthetic data, calibrated coverage, verified conflict replay —
+    its ``trust_boundary_extra`` only sets ``data``)."""
     pl_ok = verify_plan_cert(plan_cert, public_key).ok
     # trusted_policies=None => verify_rulepack_cert resolves the LIVE trusted_policy_set()
     # per call (re-scans the registered domains), so a domain registered AFTER this module

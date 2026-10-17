@@ -15,13 +15,13 @@ from feasible.domains.base import CertifyResult, ScenarioInfo, TrustVector, Veri
 
 def test_list_scenarios_includes_manufacturing_first() -> None:
     # Task 9 appends datacenter to the facade scenario list; manufacturing stays
-    # first (real data), datacenter follows (synthetic facility). Both are surfaced.
+    # first (synthetic SOP + orders), datacenter follows (synthetic facility). Both are surfaced.
     scenarios = api.list_scenarios()
     ids = [s.domain_id for s in scenarios]
     assert ids[0] == "manufacturing"
     assert "datacenter" in ids
     assert all(isinstance(s, ScenarioInfo) for s in scenarios)
-    assert scenarios[0].data == "real"
+    assert scenarios[0].data == "synthetic"
 
 
 def test_certify_returns_frozen_certifyresult_that_verifies() -> None:
@@ -43,7 +43,7 @@ def test_trust_vector_signature_self_described_without_key() -> None:
     assert isinstance(tv, TrustVector)
     assert tv.signature == "self_described"
     assert tv.checker == "pass"
-    assert tv.data == "real"
+    assert tv.data == "synthetic"
 
 
 def test_trust_vector_signature_authenticated_with_key() -> None:

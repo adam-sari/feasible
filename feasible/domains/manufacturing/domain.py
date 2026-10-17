@@ -121,6 +121,8 @@ class ManufacturingDomain:
         return None
 
     def trust_boundary_extra(self) -> dict[str, Any]:
-        """Domain-specific trust-boundary notes. Manufacturing has none beyond
-        the substrate's, so this is empty (datacenter adds capacity-recompute)."""
-        return {}
+        """Domain-specific trust-boundary notes. The sauce co-packer SOP and orders
+        are a hand-written synthetic scenario (the certs are REAL; the DATA is
+        synthetic), surfaced on ``TrustVector.data``. Coverage and conflict replay
+        keep the substrate defaults (datacenter adds capacity-recompute)."""
+        return {"data": "synthetic"}

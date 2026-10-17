@@ -29,12 +29,12 @@ from feasible.domains.base import CertifyResult, ScenarioInfo, TimelineView, Tru
 
 def test_list_scenarios_carries_datacenter_as_synthetic() -> None:
     """The datacenter scenario is surfaced with the HONEST synthetic data flag (the
-    facility is synthetic; manufacturing stays ``real``)."""
+    facility is synthetic; so is the manufacturing SOP + orders)."""
     scenarios = api.list_scenarios()
     by_id = {s.domain_id: s for s in scenarios}
     assert "manufacturing" in by_id and "datacenter" in by_id
     assert all(isinstance(s, ScenarioInfo) for s in scenarios)
-    assert by_id["manufacturing"].data == "real"
+    assert by_id["manufacturing"].data == "synthetic"
     assert by_id["datacenter"].data == "synthetic"
 
 

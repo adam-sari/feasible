@@ -23,7 +23,7 @@ def test_scenarios_route_matches_facade_verbatim() -> None:
     ]
     assert got == want
     assert got[0]["domain_id"] == "manufacturing"
-    assert got[0]["data"] == "real"
+    assert got[0]["data"] == "synthetic"
 
 
 def test_inputs_route_carries_facade_fields() -> None:
