@@ -21,6 +21,7 @@ Single-worker + seeded + sorted extraction pins extraction byte-stability.
 """
 from __future__ import annotations
 
+from ortools.sat.cp_model_pb2 import CpSolverStatus
 from ortools.sat.python import cp_model
 
 from feasible.domains import get_domain
@@ -31,7 +32,7 @@ from feasible.solve.orchestrate import SolveResult
 
 def _stage_solve(
     m: cp_model.CpModel, solver: cp_model.CpSolver, vi: DcVarIndex
-) -> int:
+) -> CpSolverStatus:
     """Staged lexicographic solve: minimize stranded power, freeze it as a hard
     bound, then minimize makespan. Returns the final CP-SAT status."""
     assert vi.stranded is not None and vi.makespan is not None

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ortools.sat.cp_model_pb2 import CpSolverStatus
 from ortools.sat.python import cp_model
 
 from feasible.ir.domain import FCIR
@@ -191,7 +192,7 @@ def build_model(ir: FCIR) -> tuple[cp_model.CpModel, VarIndex]:
 
 def freeze_l1_and_minimize_changeover(
     m: cp_model.CpModel, solver: cp_model.CpSolver, vi: VarIndex
-) -> int:
+) -> CpSolverStatus:
     """Staged lexicographic solve. Returns the final CP-SAT status."""
     m.minimize(vi.weighted_tardiness)
     status1 = solver.solve(m)
