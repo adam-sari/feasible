@@ -26,7 +26,7 @@ solver-free verifier.
   a datacenter maintenance plan (it catches maintenance that would drop below N+1
   redundancy).
 - **Built with:** Python (OR-Tools, Z3, Pydantic, FastAPI), a React/TypeScript
-  console, Ed25519-signed certificates, and a test suite that includes a 17-attack
+  console, Ed25519-signed certificates, and tests that include a 17-attack
   certificate-forgery suite.
 
 ![Feasible console, Planner tab: optimized production schedule, KPIs vs the incumbent plan, and the rule the incumbent breaks](docs/img/console-planner-manufacturing.png)
@@ -67,7 +67,7 @@ resolved from a **signed `domain_id`**. Two domains ship behind one console:
 > **Synthetic data, real verification.** Neither scenario is customer data: the sauce
 > co-packer SOP and orders are written to be realistic, and the datacenter facility's
 > numbers are illustrative. The checker, Z3 mirror, CP-SAT solve, and certificate
-> machinery are the *same real engine* in both. Every certificate carries a per-claim
+> machinery are the *same real engine* in both. Every certify result carries a per-claim
 > **trust vector**, and both report `data=synthetic` (the datacenter one also reports
 > `coverage=preview`).
 
@@ -214,7 +214,7 @@ tampered certs and asserts rejection (plus coverage / replay regressions for the
 omission moat). Offline `verify` resolves *every* registered domain regardless of
 import order (a domain-registry bootstrap), and is solver-free + LLM-free.
 
-Each certificate exposes a per-claim **trust vector** —
+Each certify result exposes a per-claim **trust vector** (computed alongside the signed certificates, not inside them) —
 `signature · checker · coverage · conflict_replay · data` — so the console can render
 *exactly* what is authenticated vs self-described, real vs synthetic, complete vs
 preview. The residual, stated honestly: a rule's **formalization metadata** (is this
@@ -222,7 +222,7 @@ clause a hard plan constraint?) is the signer's human-gated *attestation* — it
 on the pinned key, not on re-derivation. (Without `--signer-key`, `verify` still
 re-checks but reports the signer as **self-described / unverified**.)
 
-## Honest ceilings (stated in every certificate's `trust_boundary`)
+## Honest ceilings (the technical ones are also stated in each certificate's `trust_boundary`)
 
 - Verification is **IR-relative** (the plan satisfies the *approved* IR); the
   source→IR edge is closed by the governance layer + the human gate.
