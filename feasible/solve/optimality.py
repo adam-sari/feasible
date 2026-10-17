@@ -4,8 +4,8 @@ Re-solves the CP-SAT model forbidding any plan STRICTLY better than the achieved
 objective ``V = (weighted_tardiness, total_changeover)`` (lexicographic), with no
 objective. INFEASIBLE => nothing beats V => the headline optimum is corroborated.
 Labelled honestly as a SAME-ENGINE tripwire (it defends optimal-but-wrong /
-wrong-bound, not the false-INFEASIBLE class); the genuinely independent backing
-(a different solver) is a post-v1.1 roadmap item.
+wrong-bound, not the false-INFEASIBLE class). The independent backing comes from a
+different solver: Z3 corroborates the optimum (see ``feasible.cert.plan_cert``).
 """
 from __future__ import annotations
 

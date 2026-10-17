@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "feasible"
 version = "0.2.0"
-description = "Feasible — Constraint Intelligence Engine: v0.2 multi-domain console (manufacturing + datacenter verified spines, web console, Gemini policy extraction)"
+description = "Turn written operating rules into optimized schedules that are independently verified and issued with signed, offline-checkable certificates."
 requires-python = ">=3.11"
 dependencies = [
     "ortools>=9.10,<9.13",

@@ -8,8 +8,8 @@ usually live in documents and people's heads, and a schedule that quietly breaks
 is often caught late, if at all. Feasible turns each rule into a precise constraint
 linked back to the sentence it came from, and uses an optimization solver to build the
 best schedule that respects all of them. An independent checker then re-verifies the
-plan, and it ships with a signed certificate that anyone can re-check offline without
-trusting the software that produced it.
+plan, and it ships with a signed certificate that anyone can re-check offline with a
+solver-free verifier.
 
 - **Who it's for:** operations and planning teams where a broken rule is costly
   (food production, datacenter capacity and maintenance), and the reviewers or
@@ -18,11 +18,13 @@ trusting the software that produced it.
   independent verification → signed, re-checkable certificate.
 - **What's different:** the answer is not "trust the AI". An LLM (Gemini) may only
   *draft* rules for a human to approve; it never decides whether a plan is valid. A
-  separate checker re-tests every rule, a second solver (Z3) cross-checks the
-  optimizer (OR-Tools CP-SAT), and every failure names the exact rule clause it breaks.
-- **Shown on two domains:** a sauce co-packer's production schedule (it catches an
-  illegal 23:30 night-time cleanout) and a datacenter maintenance plan (it catches
-  maintenance that would drop below N+1 redundancy; this scenario's data is synthetic).
+  separate checker re-tests the plan against the approved rules, a second solver (Z3)
+  cross-checks the optimizer (OR-Tools CP-SAT), and every failure names the rule it
+  breaks.
+- **Shown on two illustrative domains (both with synthetic data):** a sauce
+  co-packer's production schedule (it catches an illegal 23:30 night-time cleanout) and
+  a datacenter maintenance plan (it catches maintenance that would drop below N+1
+  redundancy).
 - **Built with:** Python (OR-Tools, Z3, Pydantic, FastAPI), a React/TypeScript
   console, Ed25519-signed certificates, and a test suite that includes a 17-attack
   certificate-forgery suite.
@@ -59,18 +61,20 @@ resolved from a **signed `domain_id`**. Two domains ship behind one console:
 
 | Domain | Data | Verification | The gotcha it catches |
 |---|---|---|---|
-| **manufacturing** | real SOP + orders (synthetic sauce co-packer, FJSP) | real | an illegal 23:30 sanitation cleanout, with the cited SOP clause |
+| **manufacturing** | **synthetic** but realistic SOP + orders (sauce co-packer, FJSP) | **real** | an illegal 23:30 sanitation cleanout, with the cited SOP clause |
 | **datacenter** | **synthetic** facility (colo/neocloud capacity & maintenance planning) | **real** | maintenance that **spends the N+1 redundancy buffer** at a timestep |
 
-> **Synthetic data, real verification.** The datacenter scenario's numbers are
-> illustrative; the checker, Z3 mirror, CP-SAT solve, and certificate machinery are
-> the *same real engine* as manufacturing. Every certificate carries a per-claim
-> **trust vector** that says so honestly (the datacenter cert reports
-> `data=synthetic`, `coverage=preview`).
+> **Synthetic data, real verification.** Neither scenario is customer data: the sauce
+> co-packer SOP and orders are written to be realistic, and the datacenter facility's
+> numbers are illustrative. The checker, Z3 mirror, CP-SAT solve, and certificate
+> machinery are the *same real engine* in both. Every certificate carries a per-claim
+> **trust vector** (the datacenter cert reports `data=synthetic`, `coverage=preview`;
+> manufacturing's `data=real` is the engine's default label, not a claim that the
+> data comes from a real customer).
 
 ## The live demos
 
-**Manufacturing** (real data) — `python -m feasible.cli certify feasible/scenario/data`:
+**Manufacturing** (synthetic SOP, real verification) — `python -m feasible.cli certify feasible/scenario/data`:
 
 ```
 plan: status=OPTIMAL objective(weighted_tardiness, total_changeover)=(0, 90) checker=PASS
@@ -230,7 +234,7 @@ re-checks but reports the signer as **self-described / unverified**.)
 - Coverage completeness is **relative** to the deterministic span enumeration +
   classifier, not absolute (the datacenter cert reports `coverage=preview`).
 - The LLM never touches a certificate's truth claims; extraction is non-gating.
-- **Datacenter scenario data is synthetic; the verification is real.** Feasible is
-  complementary to (not a replacement for) Uptime commissioning / a PE seal, and does
+- **Both scenarios use synthetic data; the verification is real.** For the datacenter
+  domain, Feasible is complementary to (not a replacement for) Uptime commissioning / a PE seal, and does
   not model airflow/CFD or electrical-study depth — it proves the *discrete logical &
   resource* plan never drops below contracted redundancy at any step.
