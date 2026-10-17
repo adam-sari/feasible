@@ -68,13 +68,12 @@ resolved from a **signed `domain_id`**. Two domains ship behind one console:
 > co-packer SOP and orders are written to be realistic, and the datacenter facility's
 > numbers are illustrative. The checker, Z3 mirror, CP-SAT solve, and certificate
 > machinery are the *same real engine* in both. Every certificate carries a per-claim
-> **trust vector** (the datacenter cert reports `data=synthetic`, `coverage=preview`;
-> manufacturing's `data=real` is the engine's default label, not a claim that the
-> data comes from a real customer).
+> **trust vector**, and both report `data=synthetic` (the datacenter one also reports
+> `coverage=preview`).
 
 ## The live demos
 
-**Manufacturing** (synthetic SOP, real verification) — `python -m feasible.cli certify feasible/scenario/data`:
+**Manufacturing** (synthetic SOP + orders, real verification) — `python -m feasible.cli certify feasible/scenario/data`:
 
 ```
 plan: status=OPTIMAL objective(weighted_tardiness, total_changeover)=(0, 90) checker=PASS
@@ -235,6 +234,7 @@ re-checks but reports the signer as **self-described / unverified**.)
   classifier, not absolute (the datacenter cert reports `coverage=preview`).
 - The LLM never touches a certificate's truth claims; extraction is non-gating.
 - **Both scenarios use synthetic data; the verification is real.** For the datacenter
-  domain, Feasible is complementary to (not a replacement for) Uptime commissioning / a PE seal, and does
-  not model airflow/CFD or electrical-study depth — it proves the *discrete logical &
-  resource* plan never drops below contracted redundancy at any step.
+  domain, Feasible is complementary to (not a replacement for) Uptime commissioning
+  or a PE seal, and does not model airflow/CFD or electrical-study depth. It proves
+  the *discrete logical & resource* plan never drops below contracted redundancy at
+  any step.
