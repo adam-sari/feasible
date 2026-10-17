@@ -1,10 +1,46 @@
-# Feasible — Constraint Intelligence Engine (multi-domain demo, v0.2)
+# Feasible
 
-Feasible turns messy operational rules into **formal, provenance-linked
-constraints**, solves them with a real optimizer, and returns a plan that is
-**testable, explainable, and auditable**. Its thesis vs LLM-only tools is
-**generate + verify + certify**: the answer ships with a signed certificate a
-skeptic can independently re-check offline.
+**Turn written operating rules into schedules you can prove follow them.**
+
+Every operation runs on rules: a sanitation crew that only works day shifts, a
+datacenter that must keep a spare power path online during maintenance. Those rules
+usually live in documents and people's heads, and a schedule that quietly breaks one
+is often caught late, if at all. Feasible turns each rule into a precise constraint
+linked back to the sentence it came from, and uses an optimization solver to build the
+best schedule that respects all of them. An independent checker then re-verifies the
+plan, and it ships with a signed certificate that anyone can re-check offline without
+trusting the software that produced it.
+
+- **Who it's for:** operations and planning teams where a broken rule is costly
+  (food production, datacenter capacity and maintenance), and the reviewers or
+  auditors who have to sign off on their plans.
+- **What it does:** written rules → formal constraints → optimized schedule →
+  independent verification → signed, re-checkable certificate.
+- **What's different:** the answer is not "trust the AI". An LLM (Gemini) may only
+  *draft* rules for a human to approve; it never decides whether a plan is valid. A
+  separate checker re-tests every rule, a second solver (Z3) cross-checks the
+  optimizer (OR-Tools CP-SAT), and every failure names the exact rule clause it breaks.
+- **Shown on two domains:** a sauce co-packer's production schedule (it catches an
+  illegal 23:30 night-time cleanout) and a datacenter maintenance plan (it catches
+  maintenance that would drop below N+1 redundancy; this scenario's data is synthetic).
+- **Built with:** Python (OR-Tools, Z3, Pydantic, FastAPI), a React/TypeScript
+  console, Ed25519-signed certificates, and a test suite that includes a 17-attack
+  certificate-forgery suite.
+
+![Feasible console, Planner tab: optimized production schedule, KPIs vs the incumbent plan, and the rule the incumbent breaks](docs/img/console-planner-manufacturing.png)
+
+<details>
+<summary>Datacenter scenario in the same console</summary>
+
+![Feasible console, Planner tab for the datacenter scenario: redundancy over time against the N+1 floor](docs/img/console-planner-datacenter.png)
+
+</details>
+
+## How it works
+
+Feasible's approach is **generate + verify + certify**: messy operational rules become
+formal, provenance-linked constraints, a real optimizer produces the plan, and the
+result is testable, explainable and auditable.
 
 ```
 messy inputs ─▶ formalized rules ─▶ governance ─▶ candidate plan ─▶ verified ─▶ signed certificate
@@ -81,7 +117,9 @@ headline.
   rules are reported separately from structural ones. **Z3** (`feasible/smt`)
   independently corroborates and emits UNSAT cores; a **same-engine CP-SAT tripwire**
   corroborates optimality for domains that opt in (manufacturing), and a non-FJSP
-  domain opts out honestly rather than over-claiming.
+  domain opts out honestly rather than over-claiming. For both domains Z3 also re-runs
+  the "can any feasible plan beat this objective?" query as a **disjoint-engine**
+  optimality corroboration (skipped, never faked, on timeout).
 - **CP-SAT compiler** (`feasible/compile` + per-domain `solve`) — manufacturing:
   optional intervals, per-machine `AddCircuit`, sequence-dependent setups, day-shift
   cleanouts, lexicographic (tardiness, changeover). Datacenter: a capacity &
@@ -149,8 +187,8 @@ python -m feasible.cli extract feasible/scenario/data/shop_rules.md
 python -m uvicorn web.server:app --port 8000
 npm --prefix web/app install && npm --prefix web/app run dev
 
-python -m pytest -q     # 467 tests (incl. a 17-attack cert-forgery suite over BOTH domains)
-python -m mypy feasible # clean (58 source files)
+python -m pytest -q     # full suite (incl. a 17-attack cert-forgery suite over BOTH domains)
+python -m mypy feasible # clean
 ```
 
 The datacenter domain is exercised through the facade / console (`api.certify("datacenter")`)
@@ -185,8 +223,10 @@ re-checks but reports the signer as **self-described / unverified**.)
 
 - Verification is **IR-relative** (the plan satisfies the *approved* IR); the
   source→IR edge is closed by the governance layer + the human gate.
-- Optimality is CP-SAT-self-reported + a **same-engine** tripwire (manufacturing) —
-  not independently proven by a second solver (a roadmap item).
+- Optimality is CP-SAT-self-reported + a **same-engine** tripwire (manufacturing),
+  corroborated by a **disjoint second solver** (Z3) in both domains. Both encodings are
+  authored here, so a shared *modelling* error would not be caught, and the solver-free
+  `verify` does not re-derive optimality (it does recompute the objective value).
 - Coverage completeness is **relative** to the deterministic span enumeration +
   classifier, not absolute (the datacenter cert reports `coverage=preview`).
 - The LLM never touches a certificate's truth claims; extraction is non-gating.
